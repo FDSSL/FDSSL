@@ -1,4 +1,9 @@
 module Main where
 
+import Syntax
+import Pretty
+
 main :: IO ()
-main = putStrLn "Hello, Haskell!"
+main = do
+  _ <- putStrLn $ pretty exampleProg
+  putStrLn "Testing"
