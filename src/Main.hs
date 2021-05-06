@@ -1,9 +1,13 @@
 --{-# LANGUAGE GADTs #-}
+--{- LANGUAGE  AllowAmbiguousTypes -}
+{-# LANGUAGE TypeOperators #-}
+
 module Main where
 
 import Data.Matrix
 import Data.Vector
-
+import Data.Typeable
+import Numeric.Natural
 -- data Var a where
 --   Val  ::        Num a => a    -> Var a
 --   ValB ::                 Bool -> Var Bool
@@ -17,6 +21,14 @@ data Type = Double | Float | Bool | Int | Uint
 data Dim = Two | Three | Four
   deriving (Eq, Ord, Show)
 
+-- I want that type damnit!
+conv :: Type -> TypeRep
+conv Double = let a = 1 :: Double  in typeOf a
+conv Float  = let a = 1 :: Float   in typeOf a
+conv Int    = let a = 1 :: Int     in typeOf a
+conv Bool   = let a = True         in typeOf a
+conv Uint   = let a = 1 :: Natural in typeOf a
+
 
 -- These are for external
 data Var =
@@ -27,24 +39,47 @@ data Var =
 
 --type Env = [(Var,Matrix a)]
 
-type Variable a = (String, Type, Either a Var)
+data Variable a = Variable {
+  name :: String,
+  vtype :: TypeRep,
+  value :: a
+}
+  deriving Show
+
+instance Functor Variable where
+  fmap f (Variable s t v) = Variable s t (f v)
 
 
-external :: Var -> Type -> String -> Maybe (Variable a)
-external Var       t      s = Just (s, t,      Right Var)
-external v@(Vec _) t      s = Just (s, t,      Right v)
-external m         Float  s = Just (s, Float,  Right m)
-external m         Double s = Just (s, Double, Right m)
-external _         _      _ = Nothing
+boolM :: Bool -> Maybe ()
+boolM True  = Just ()
+boolM False = Nothing
 
-defM :: Fractional a => String -> Matrix a -> Maybe (Variable (Matrix a))
-defM s m =  case Prelude.all (\x -> x >=2 && x <= 4) [nrows m, ncols m] of
-                  True  -> Just (s,Float,Left m)
-                  False -> Nothing
+nothingIf :: (a -> Bool) -> a -> Maybe a
+nothingIf f a = (boolM . f) a >> Just a
 
-defV :: String -> Vector a -> Maybe (Variable (Vector a))
-defV s v = case (length v >= 2 && length v <= 4) of
-             True -> Just (s, )
+
+ext :: Var -> Type -> String -> Maybe (Variable Var)
+ext Var       t      s = Just (Variable s (conv t)      Var)
+ext v@(Vec _) t      s = Just (Variable s (conv t)      v)
+ext m         Float  s = Just (Variable s (conv Float)  m)
+ext m         Double s = Just (Variable s (conv Double) m)
+ext _         _      _ = Nothing
+
+checkBounds :: Int -> Bool
+checkBounds x = x >= 2 && x <= 4
+
+checkMatrix :: Matrix a -> Bool
+checkMatrix = Prelude.all checkBounds . ([nrows, ncols] <*>) . \m -> [m]
+
+
+defM :: (Typeable a, Fractional a) => String -> Matrix a -> Maybe (Variable (Matrix a))
+defM s m =  nothingIf checkMatrix m >> Just (Variable s (typeRep m) m)
+
+
+defV :: Typeable a => String -> Vector a -> Maybe (Variable (Vector a))
+defV s v = nothingIf (checkBounds . Data.Vector.length) v >> Just (Variable s (typeRep v) v)
+
+
 
 -- data Dim1 a = Vec Dim a
 -- data Dim0 a = Val a
@@ -54,6 +89,17 @@ defV s v = case (length v >= 2 && length v <= 4) of
 
 --type BType = Type Bool
 
+
+
+
+-- class Vectorizable a where
+--   create :: String -> a -> Maybe (Variable a)
+
+-- instance Enum a => Vectorizable (Vector a) where
+--   create s v = defV s Int v
+
+-- instance RealFloat a => Vectorizable (Vector a) where
+--   create s v = defV s Float v
 
 main :: IO ()
 main = putStrLn "Hello, Haskell!"
