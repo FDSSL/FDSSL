@@ -4,15 +4,15 @@ import Syntax
 
 -- | Example function, that add increments it's arg by 1
 fInc :: Func
-fInc = Func "inc" [("x",TI)] TI (Return (BinOp Add (Ref "x") (I 1)))
+fInc = Func "inc" [("x",TI)] TI (Body (BinOp Add (Ref "x") (I 1)) "")
 
 -- | Example attribute passed into vertex shader
 aAttr :: Func
-aAttr = attribute TV4 "aAttr" (wrap (1 :: Int, 2 :: Int, 3 :: Int, 4 :: Int))
+aAttr = attribute TV4 "aAttr"
 
 -- | Example varying, passed from vertex -> fragment
 vColor :: Func
-vColor = varying TV4 "vColor" (wrap (0.2 :: Float, 0.5 :: Float, 0.6 :: Float, 1.0 :: Float))
+vColor = varying TV4 "vColor"
 
 -- | Simple expr, corresponding to vec2(1,2) (a vector of ints)
 expr1 :: Expr
@@ -36,32 +36,32 @@ expr1 = V2 (I 1, I 2)
 
 -- | Attribute corresponding to a vertex pos passed in at the start of a vertex shader, w/ default vals
 aVertPos :: Func
-aVertPos = varying TV4 "aVertPos" (wrap (0.2 :: Float, 0.5 :: Float, 0.6 :: Float, 1.0 :: Float))
+aVertPos = attribute TV4 "aVertPos"
 
 -- | Varying x and Y vector that will be passed to fragment shader, w/ default 0 vals
 vXY :: Func
-vXY = varying TV2 "vXY" (wrap (0.0 :: Float, 0.0 :: Float))
+vXY = varying TV2 "vXY"
 
 -- | Uniform Projection matrix (used for model-view-projection)
 uProjectionMatrix :: Func
-uProjectionMatrix = uniform TMat4 "uProjectionMatrix" U
+uProjectionMatrix = uniform TMat4 "uProjectionMatrix"
 
 -- | Uniform Model View matrix (used for model-view-projection)
 uModelViewMatrix :: Func
-uModelViewMatrix = uniform TMat4 "uModelViewMatrix" U
+uModelViewMatrix = uniform TMat4 "uModelViewMatrix"
 
 -- | Vertex shader that just passes along a position
-vert1 :: VertShader
-vert1 = VertShader [vXY] (Update "gl_Position" (BinOp Mul (Ref "uProjectionMatrix") (BinOp Mul (Ref "uModelViewMatrix") (Ref "aVertPos"))) Nothing)
+vert1 :: Shader
+vert1 = Shader VertShader [vXY] (Update "gl_Position" (BinOp Mul (Ref "uProjectionMatrix") (BinOp Mul (Ref "uModelViewMatrix") (Ref "aVertPos"))) Nothing)
 
 -- | Vertex shader that extracts and passes along the X and Y position of a given vertex
-vertXY :: VertShader
-vertXY = VertShader [vXY] (Update "vXY" (V2 (AccessN "aVertPos" "x", AccessN "aVertPos" "y")) Nothing)
+vertXY :: Shader
+vertXY = Shader VertShader [] (Update "vXY" (V2 (AccessN "aVertPos" "x", AccessN "aVertPos" "y")) Nothing)
 
 -- | Fragment shader that colors by X and Y...if given before
-frag1 :: FragShader
-frag1 = FragShader [] (Update "gl_FragColor" (V4 (AccessN "vXY" "x", D 0.3, AccessN "vXY" "y", D 1.0)) Nothing)
+frag1 :: Shader
+frag1 = Shader FragShader [] (Update "gl_FragColor" (V4 (AccessN "vXY" "x", D 0.3, AccessN "vXY" "y", D 1.0)) Nothing)
 
 -- | This is a working shader program that should be type correct
-e5 :: Prog
-e5 = Prog [uProjectionMatrix,uModelViewMatrix,fInc] [aVertPos] (comp vert1 vertXY) frag1
+e5 :: Maybe Prog
+e5 = comp vert1 vertXY >>= \v -> Just $ Prog [uProjectionMatrix,uModelViewMatrix,fInc] [aVertPos] v frag1
