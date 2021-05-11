@@ -17,9 +17,9 @@ build-type:          Simple
 extra-source-files:  CHANGELOG.md, README.md
 
 executable FDSSL
-  main-is:             src/Main.hs
-  -- other-modules:
+  main-is:             Main.hs
+  other-modules:       Examples, Pretty, Syntax
   -- other-extensions:
-  build-depends:       base >=4.13 && <4.14, matrix, vector
-  -- hs-source-dirs:
+  build-depends:       base >=4.12 && <4.14, vector, matrix, containers
+  hs-source-dirs:      src
   default-language:    Haskell2010
