@@ -67,7 +67,7 @@ data Expr =
   V2 (Expr,Expr) |            -- vec2
   V3 (Expr,Expr,Expr) |       -- vec3
   V4 (Expr,Expr,Expr,Expr) |  -- vec4
-  Mat4 (Matrix Expr) |        -- mat4, as any size for now
+  Mat4 (Matrix Expr) |        -- mat4, as any size for now, TODO we'll fix this later
   Array [Expr] |          -- lists, which correspond to arrays
   Ref String            | -- reference (corresponds to let bound var OR function w/ no args (global ref))
   App String [Expr]     | -- prefix app
@@ -78,23 +78,22 @@ data Expr =
 -- env is a list of functions
 type Env = [Func]
 
-data ShaderName = VertShader | FragShader
+data ShaderType = VertShader | FragShader
   deriving (Show, Eq)
 
-data Shader = Shader ShaderName Env Expr
-
-
-combine :: [Func] -> [Func] -> Maybe [Func]
-combine l r = case null $ S.intersection (S.fromList l) (S.fromList r) of
-                   True  -> Just (l++r)
-                   False -> Nothing
+data Shader = Shader ShaderType Env Expr
 
 class Composable a where
  comp :: a -> a -> Maybe a
 
+instance Composable [Func] where
+  comp l r = case null $ S.intersection (S.fromList l) (S.fromList r) of
+                     True  -> Just (l++r)
+                     False -> Nothing
+
 -- This could be a case for Monoid
 instance Composable Shader where
-  comp (Shader s e t) (Shader s' e' t') = sameS s s' >> combine e e' >>= \e -> Just $ Shader s e (Seq t t')
+  comp (Shader s e t) (Shader s' e' t') = sameS s s' >> comp e e' >>= \e -> Just $ Shader s e (Seq t t')
     where
       sameS a b = if a == b then Just () else Nothing
 
