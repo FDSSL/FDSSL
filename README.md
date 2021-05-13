@@ -58,17 +58,20 @@ Functions, as defined in our context via `Func`, are used generally to define al
 
 ## Instructions to Run
 
-This project uses Cabal. Running this program results in a simple shader program
+This project uses Cabal, but you can just as easily use `ghci src/*.hs` if you have everything installed. Running this program results in a simple shader program
 (Vertex + Fragment) outputted to STDOUT. To run these example shader programs, we've written up a simple webpage to test them in, [https://www.uphouseworks.com/fdssl-test.html](https://www.uphouseworks.com/fdssl-test.html).
 
-You can do this by running `cabal run`. Which will build and run the executable, and output two resulting shaders (a vertex and a fragment shader).
+To run with cabal, you can use:
+```
+cabal run
+```
+Which will build and run the executable, and output two resulting shaders (a vertex and a fragment shader).
 
-If you are interested in dynamically running it, you can use `cabal repl` instead (synonymous with `stack ghci`). From here, you can run `main`, producing the same output as before, or you can run `main2` to produce a different shader program. This new program will correspond to a dynamic shader that transforms positions and colors over time.
+If you are interested in dynamically running it, you can use either `cabal repl` or `ghci src/*.hs` instead. From here, you can run `main`, producing the same output as before, or you can run `main2` to produce a different shader program. This new program will correspond to a dynamic shader that transforms positions and colors over time.
 
 The structure of FDSSL is:
 - `Examples`: various vertex & fragment shaders written in FDSSL, with a pair of example programs
 - `Main`: easiest way to run and print shader programs
 - `Pretty`: our pretty printer
-- `Setup`: not important..
 - `Syntax`: Holds the abstract syntax for FDSSL
 - `TypeChecker`: Empty, but will hold our type checker for programs written in FDSSL abstract syntax
