@@ -45,7 +45,7 @@ instance Show Expr where
   show (Seq t t') = show t ++ "\n" ++ show t'
   show (I i) = show i
   show (B b) = if b then "true" else "false"
-  show (F f) = show f ++ "f"
+  show (F f) = show f
   show (D d) = show d
   show (V2 (a,b)) = "vec2(" ++ showParams [a,b] ++ ")"
   show (V3 (a,b,c)) = "vec3(" ++ showParams [a,b,c] ++ ")"
@@ -115,7 +115,7 @@ pretty :: Prog -> String
 pretty (Prog e a v f) = "\n\n===Vertex Shader===\n\n" ++
                         preface ++ prettyEnv (e ++ a) ++
                         prettyShader v ++
-                        "\n\n===Fragment Shader===\n\n" ++ 
+                        "\n\n===Fragment Shader===\n\n" ++
                         preface ++ prettyEnv e ++
                         prettyShader (passEnvToShader v f)
 

@@ -14,4 +14,7 @@ import Numeric.Natural
 
 
 main :: IO ()
-main = putStrLn $ prettySafe e5
+main = putStrLn $ prettySafe prog1
+
+main2 :: IO ()
+main2 = putStrLn $ prettySafe prog2
