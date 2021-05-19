@@ -108,9 +108,6 @@ apply :: (Expr -> Expr) -> Func -> Func
 apply f (Func n p t (Body b r)) = Func n p t (Body (f b) r)
 apply _ f = f
 
-
---commentS :: String -> Func -> Func
-
 instance Eq Func where
   (==) (Func a _ _ _) (Func b _ _ _) = a == b
 

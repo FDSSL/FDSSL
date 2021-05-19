@@ -1,0 +1,56 @@
+// Idea for syntax of an FDSSL shader
+
+uniform Mat4 uProjMat
+uniform Mat4 uMVM
+uniform Int uValue
+
+// an example of a basic function
+wave : Float x -> Float = sin x
+
+fact : Int x -> Int = {
+  if x <= 1 then {
+    1
+  } else {
+    mut Int accum = 1
+    for x do |y| {
+      // set is 'update'
+      set accum (accum * y)
+    }
+    accum
+  }
+}
+
+// basic shader
+vert v1 : Vec3 aVertPos -> () = {
+  set gl_Position aVertPos
+}
+
+// better shader, w/ an output, varyings
+vert v2 : Vec3 aVertPos -> Vec3 vXYZ = {
+  mut Float x = 0.1
+  mut Float y = 0.5
+
+  set gl_Position (uProjMat * uMVM * aVertPos)
+
+  out vXYZ aVertPos
+}
+
+vert v12 : Vec3 aVertPos -> Vec3 vXYZ = v2 . v1
+
+frag f1 : () -> () = {
+ set gl_FragColor (vec4 0.5 0.5 0.5 1.0)
+}
+
+frag f2 : Vec3 vXYZ -> () = {
+  const Float r = wave vXYZ[0]
+  const Float g = wave vXYZ[1]
+  const Float b = wave vXYZ[2]
+
+  const Vec4 col = vec4 r g b 1.0
+
+  set gl_FragColor col
+}
+
+frag f12 : Vec3 vXYZ -> () = f2 . f1
+
+prog : Prog = mkProg v12 f12
