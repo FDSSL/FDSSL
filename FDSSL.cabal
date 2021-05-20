@@ -20,6 +20,6 @@ executable FDSSL
   main-is:             Main.hs
   other-modules:       Examples, Pretty, Syntax
   -- other-extensions:
-  build-depends:       base >=4.12 && <4.14, vector, matrix, containers
+  build-depends:       base >=4.7 && <5, vector, matrix, containers
   hs-source-dirs:      src
   default-language:    Haskell2010
