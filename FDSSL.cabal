@@ -18,8 +18,8 @@ extra-source-files:  CHANGELOG.md, README.md
 
 executable FDSSL
   main-is:             Main.hs
-  other-modules:       Examples, Pretty, Syntax
+  other-modules:       Examples, Pretty, Syntax, Parser, TypeChecker
   -- other-extensions:
-  build-depends:       base >=4.12 && <4.14, vector, matrix, containers
+  build-depends:       base >=4.7 && <5, vector, matrix, containers, parsec
   hs-source-dirs:      src
   default-language:    Haskell2010

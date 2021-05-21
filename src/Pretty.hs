@@ -34,9 +34,14 @@ instance Show BOp where
   show BitXor = " ^ "
 
 instance Show Expr where
-  show (Let t n e e') = show t ++ " " ++ n ++ " = " ++ show e ++ ";\n" ++ show e'
-  show (Update n e (Just e')) = n ++ " = " ++ show e ++ ";\n" ++ show e'
-  show (Update n e Nothing) = n ++ " = " ++ show e ++ ";"
+  show (Mut t n e e') = show t ++ " " ++ n ++ " = " ++ show e ++ ";\n" ++ show e'
+  show (Const t n e e') = "const " ++ show t ++ " " ++ n ++ " = " ++ show e ++ ";\n" ++ show e'
+
+  -- internally, the same
+  show (Update n e e') = n ++ " = " ++ show e ++ ";\n" ++ show e'
+  show (Out n e e') = n ++ " = " ++ show e ++ ";\n" ++ show e'
+
+  show NOp = ""
   show (Branch c t e) = "if (" ++ show c ++ ") {\n" ++ show t ++ "\n} else {\n" ++ show e ++ "\n}\n"
   show (For i (Just n) e t) = "for (int " ++ n ++ " = 0; n < " ++ show i ++ "; "++n++"="++n++"+1) {\n" ++ show e ++ "\n}\n" ++ show t
   show (For i Nothing e t) = "for (int fdssl_cntr = 0; fdssl_cntr < " ++ show i ++ "; fdssl_cntr=fdssl_cntr+1) {\n" ++ show e ++ "\n}\n" ++ show t
@@ -52,11 +57,11 @@ instance Show Expr where
   show (V4 (a,b,c,d)) = "vec4(" ++ showParams [a,b,c,d] ++ ")"
   show (Mat4 m) = "??? mat4 isn't done yet ???"
   show (Ref r) = r
-  show (App n ls) = n ++ "(" ++ showParams ls ++ ")"
+  show (App n ls e) = n ++ "(" ++ showParams ls ++ ");\n" ++ show e
   show (BinOp b e e') = show e ++ show b ++ show e'
   show (AccessN s n) = s ++ "." ++ n
   show (AccessI s i) = s ++ "[" ++ show i ++ "]"
-  show _ = error "Undefined value present! Invalid program"
+  show _ = error "Undefined Expr present! Invalid program"
 
 instance Show Ret where
   show (Body e "") = "return " ++ show e ++ ";" -- Body should be changed here, perhaps another parameter, a Ref?
@@ -85,7 +90,7 @@ wrapMain s = "void main() {\n" ++ s ++ "\n}"
 
 -- | Pretty print any general shader
 prettyShader :: Shader -> String
-prettyShader (Shader _ env e) = prettyEnv env ++ "\n" ++ wrapMain (prettyE e)
+prettyShader (Shader _ env1 env2 e) = prettyEnv env1 ++ "\n" ++ prettyEnv env2 ++ "\n" ++ wrapMain (prettyE e)
 
 -- | Pretty print an env w/ a given function and an Env (aka a list of Functions)
 --prettyEnv :: (Func -> String) -> Env -> String
@@ -101,7 +106,7 @@ prettyG t n = show t ++ " " ++ n ++ ";"
 
 -- | Combine a vertex shader with a fragment shader, producing a fragment shader with the env from the prior vertex shader
 passEnvToShader :: Shader -> Shader -> Shader
-passEnvToShader (Shader s e _) (Shader s' e' expr) = Shader s (e ++ e') expr
+passEnvToShader (Shader s _ e _) (Shader s' e' eo expr) = Shader s (e ++ e') eo expr
 
 -- constant preface
 preface :: String

@@ -26,6 +26,8 @@ data BOp =
   And |
   Or  |
 
+  Compose | -- special bin op for composition, does NOT output to an actual program, but just combines those shaders internally
+
   -- relational ops
   Eq  | -- ==
   Neq | -- !=
@@ -53,13 +55,16 @@ data Type =
 data Ret = Body Expr String | Uniform | Attribute | Varying
 
 data Expr =
-  Let Type String Expr Expr    | -- let binding
-  Update String Expr (Maybe Expr) | -- updating of an env variable (effectful, and may be the last statement)
+  Mut Type String Expr Expr    | -- mutable binding
+  Const Type String Expr Expr    | -- const binding
+  Update String Expr Expr | -- updating of an env variable (effectful, and may be the last statement)
+  Out String Expr Expr | -- akin to update, but ONLY for return values in shaders
   Branch Expr Expr Expr       | -- branching
-  For Int (Maybe String) Expr Expr  | -- produces a value from evaluating expr 'int' times, e.x. let x = 1+x \n let x = 1+x \n ... let x = 1+x \n x (optional index name can be given after do
+  For Expr (Maybe String) Expr Expr  | -- produces a value from evaluating expr 'int' times, e.x. let x = 1+x \n let x = 1+x \n ... let x = 1+x \n x (optional index name can be given after do
   SComment String Expr         | -- single-line comment
   BComment String Expr         | -- block comment
   Seq Expr Expr | -- sequence 2 top-level exprs (statements), used to join statements together across shaders together (composition)
+  NOp | -- nop
   I Int  |    -- literal int
   B Bool |    -- bool
   F Float |   -- float
@@ -70,7 +75,7 @@ data Expr =
   Mat4 (Matrix Expr) |        -- mat4, as any size for now, TODO we'll fix this later
   Array [Expr] |          -- lists, which correspond to arrays
   Ref String            | -- reference (corresponds to let bound var OR function w/ no args (global ref))
-  App String [Expr]     | -- prefix app
+  App String [Expr] Expr | -- prefix app
   BinOp BOp Expr Expr   | -- infix app
   AccessN String String | -- structure access by name
   AccessI String Int      -- structure access by index
@@ -81,7 +86,8 @@ type Env = [Func]
 data ShaderType = VertShader | FragShader
   deriving (Show, Eq)
 
-data Shader = Shader ShaderType Env Expr
+-- | Shaders have a type, a set of inputs, and a set of outputs, as well as an expr
+data Shader = Shader ShaderType Env Env Expr
 
 class Composable a where
  comp :: a -> a -> Maybe a
@@ -93,7 +99,7 @@ instance Composable [Func] where
 
 -- This could be a case for Monoid
 instance Composable Shader where
-  comp (Shader s e t) (Shader s' e' t') = sameS s s' >> comp e e' >>= \e -> Just $ Shader s e (Seq t t')
+  comp (Shader s e1 e2 t) (Shader s' e1' e2' t') = sameS s s' >> comp e1 e2' >>= \ea -> comp e2 e2' >>= \eb -> Just $ Shader s ea eb (Seq t t')
     where
       sameS a b = if a == b then Just () else Nothing
 

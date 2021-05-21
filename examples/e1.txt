@@ -5,16 +5,18 @@ uniform Mat4 uMVM
 uniform Int uValue
 
 // an example of a basic function
-wave : Float x -> Float = sin x
+wave : Float x -> Float = {
+  sin (x)
+}
 
 fact : Int x -> Int = {
   if x <= 1 then {
     1
   } else {
     mut Int accum = 1
-    for x do |y| {
+    for x do {
       // set is 'update'
-      set accum (accum * y)
+      set accum (accum * x)
     }
     accum
   }
@@ -42,9 +44,9 @@ frag f1 : () -> () = {
 }
 
 frag f2 : Vec3 vXYZ -> () = {
-  const Float r = wave vXYZ[0]
-  const Float g = wave vXYZ[1]
-  const Float b = wave vXYZ[2]
+  const Float r = wave (vXYZ[0])
+  const Float g = wave (vXYZ[1])
+  const Float b = wave (vXYZ[2])
 
   const Vec4 col = vec4 r g b 1.0
 
