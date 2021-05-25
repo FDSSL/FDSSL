@@ -15,11 +15,14 @@ import Data.Functor.Identity(Identity)
 
 -- | Parser state from a program
 data PState = PState {
-  uniforms :: [Func], -- uniforms
+  uniforms :: Env, -- uniforms
   funcs    :: [Func], -- user-defined functions
   shaders  :: [(String,Shader)], -- shaders declared along the way
   progs    :: [(String,Prog)]  -- programs parsed along the way
 }
+
+translate :: String -> a -> Parser a
+translate s a = reserved s *> return a
 
 initialState :: PState
 initialState = PState [] [] [] []
@@ -29,13 +32,16 @@ lookupShader s = do
   (PState _ _ ss _) <- getState
   return $ lookup s ss
 
-addUni :: Func -> Parser ()
+addUni :: Opaque -> Parser ()
 addUni u' = do
   (PState u f s p) <- getState
   putState $ PState (u':u) f s p
 
-getUnis :: Parser ([Func])
+getUnis :: Parser (Env)
 getUnis = getState >>= return . uniforms
+
+getFuncs :: Parser [Func]
+getFuncs = getState >>= return . funcs
 
 addFunc :: Func -> Parser ()
 addFunc f' = do
@@ -112,6 +118,9 @@ commaSep2 p = (:) <$> (lexeme p <* lexeme comma) <*> commaSep1 p
 commaSep1 :: ParsecT String u Identity a -> ParsecT String u Identity [a]
 commaSep1 = P.commaSep1 lexer
 
+commaSep :: ParsecT String u Identity a -> ParsecT String u Identity [a]
+commaSep = P.commaSep lexer
+
 -- | Comma separator
 comma :: ParsecT String u Identity String
 comma = P.comma lexer
@@ -174,7 +183,7 @@ parseParam =
 
 -- | Parse several params
 parseParams :: Parser ([(String,Type)])
-parseParams = parens $ commaSep2 $ parseParam
+parseParams = parens $ commaSep $ parseParam
 
 -- | Parse a uniform
 parseUniform :: Parser ()
@@ -187,7 +196,7 @@ parseUniform =
     DT.traceM $ "uni type " ++ (show typ)
     name <- lowIdentifier
     DT.traceM $ "uni name " ++ name
-    let u = Func name [] typ Uniform
+    let u = Opaque Uniform typ name
     -- add uniform to state
     addUni u
     return ()
@@ -202,13 +211,6 @@ parseFuncSignature =
     t <- parseType
     return (params,t)
   <|>
-  -- t -> t
-  do
-    p <- parseParam
-    reservedOp "->"
-    t <- parseType
-    return ([p],t)
-  <|>
   -- t
   do
     t <- parseType
@@ -217,42 +219,35 @@ parseFuncSignature =
 parseShaderSignature :: Parser ([(String,Type)],[(String,Type)])
 parseShaderSignature =
   do
-    t1 <- (try parseParams <|> do {parseParam >>= \z -> return [z]} <|> string "()" *> return [])
+    t1 <- parseParams
     whitespace
     DT.traceM $ "T1 obtained as" ++ show t1
     reservedOp "->"
     whitespace
-    t2 <- (try parseParams <|> do {parseParam >>= \z -> return [z]} <|> string "()" *> return [])
+    t2 <- parseParams
     DT.traceM $ "T2 obtained as" ++ show t2
     return (t1,t2)
 
+bops :: [(String,BOp)]
+bops = [
+  ("+", Add),
+  ("-", Sub),
+  ("*", Mul),
+  ("/", Div),
+  ("%", Mod),
+  ("&&", And),
+  ("||", Or),
+  ("==", Eq),
+  ("!=", Neq),
+  (">=", Gte),
+  (">", Gt),
+  ("<=", Lte),
+  ("<", Lt)
+  ]
+
 parseBOp :: Parser (BOp)
-parseBOp =
-  reserved "+" *> return Add
-  <|>
-  reserved "-" *> return Sub
-  <|>
-  reserved "*" *> return Mul
-  <|>
-  reserved "/" *> return Div
-  <|>
-  reserved "%" *> return Mod
-  <|>
-  reserved "&&" *> return And
-  <|>
-  reserved "||" *> return Or
-  <|>
-  reserved "==" *> return Eq
-  <|>
-  reserved "!=" *> return Neq
-  <|>
-  reserved ">=" *> return Gte
-  <|>
-  reserved ">" *> return Gt
-  <|>
-  reserved "<=" *> return Lte
-  <|>
-  reserved "<" *> return Lt
+parseBOp = let (p:ps) = map (uncurry translate) bops in foldl (<|>) p ps
+
   -- TODO no bitwise ops in here yet
 
 -- | Parse an expr
@@ -371,8 +366,8 @@ parseFunc =
     return ()
 
 -- | Convert a pair of name & type (a param), to a func for internal rep
-toVarying :: (String,Type) -> Func
-toVarying (s,t) = Func s [] t Varying
+toVarying :: (String,Type) -> Opaque
+toVarying (s,t) = Opaque Varying t s
 
 parseShader :: Parser ()
 parseShader = try $ do
@@ -439,7 +434,9 @@ parseProgram = try $ do
   (Just vs) <- lookupShader v
   (Just fs) <- lookupShader f
   unis <- getUnis
-  let p = Prog unis (getInputs vs) vs fs
+  progFuncs <- getFuncs
+  let funs = zip (repeat Nothing) progFuncs :: Funcs
+  let p = Prog unis funs vs fs
   -- add a named program to the env
   addProg (n,p)
   return ()

@@ -66,18 +66,26 @@ instance Show Expr where
 instance Show Ret where
   show (Body e "") = "return " ++ show e ++ ";" -- Body should be changed here, perhaps another parameter, a Ref?
   show (Body e r) = show e ++ "\nreturn " ++ r ++ ";"
-  show Uniform = "uniform"
+
+instance Show OpaqueType where
+  show Uniform   = "uniform"
   show Attribute = "attribute"
-  show Varying = "varying"
+  show Varying   = "varying"
+
+
+instance Show Opaque where
+  show (Opaque ot t n) = (++";\n") . mconcat $ intersperse " " $ [show ot, show t, n]
 
 instance Show Func where
-  show (Func f ls t b@(Body _ _)) = show t ++ " " ++ f ++ "(" ++ concat (intersperse "," (map (\(n,t') -> show t' ++ " " ++ n) ls)) ++ ") {\n" ++ show b ++ "\n}\n"
-  show (Func f [] t e) = (++";\n") . concat $ (intersperse " " [show e, show t, f])
-  show (Func f _ _ _) = "// External variable " ++ f ++ " has a strange definition\n"
+  show (Func f ls t b) = show t ++ " " ++ f ++ "(" ++ concat (intersperse "," (map (\(n,t') -> show t' ++ " " ++ n) ls)) ++ ") {\n" ++ show b ++ "\n}\n"
+
+
+prettyFuncs :: ShaderType -> (Maybe ShaderType, Func) -> String
+prettyFuncs typ (Just ftyp, f) = if typ == ftyp then show f else ""
+prettyFuncs _   (Nothing,   f) = show f
 
 showParams :: [Expr] -> String
 showParams ls = concat (intersperse "," (map show ls))
-
 
 
 -- | Pretty print a Top level expression (really a statement)
@@ -106,7 +114,7 @@ prettyG t n = show t ++ " " ++ n ++ ";"
 
 -- | Combine a vertex shader with a fragment shader, producing a fragment shader with the env from the prior vertex shader
 passEnvToShader :: Shader -> Shader -> Shader
-passEnvToShader (Shader s _ e _) (Shader s' e' eo expr) = Shader s (e ++ e') eo expr
+passEnvToShader (Shader _ _ e _) (Shader s' e' eo expr) = Shader s' (e ++ e') eo expr
 
 -- constant preface
 preface :: String
@@ -117,12 +125,14 @@ pretty :: Prog -> String
 -- 'e' will be brought in as 'uniforms' across all stages
 -- 'a' is the attribute env, which goes directly to the vertex shader alone
 -- 'v' is the vertex shader, and whatever env is exports is passed to the fragment shader 'f'
-pretty (Prog e a v f) = "\n\n===Vertex Shader===\n\n" ++
-                        preface ++ prettyEnv (e ++ a) ++
-                        prettyShader v ++
-                        "\n\n===Fragment Shader===\n\n" ++
-                        preface ++ prettyEnv e ++
-                        prettyShader (passEnvToShader v f)
+pretty (Prog e funcs v f) = "\n\n===Vertex Shader===\n\n" ++
+                            preface ++ prettyEnv e ++
+                            concatMap (prettyFuncs FragShader) funcs ++
+                            prettyShader v ++
+                            "\n\n===Fragment Shader===\n\n" ++
+                            preface ++ prettyEnv e ++
+                            concatMap (prettyFuncs VertShader) funcs ++
+                            prettyShader f
 
 prettySafe :: Maybe Prog -> String
 prettySafe (Just p) = pretty p
