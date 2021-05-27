@@ -28,11 +28,11 @@ fInc :: Func
 fInc = Func "inc" [("x",TI)] TI (Body (BinOp Add (Ref "x") (I 1)) "")
 
 -- | Example attribute passed into vertex shader
-aAttr :: Func
+aAttr :: Opaque
 aAttr = attribute TV4 "aAttr"
 
 -- | Example varying, passed from vertex -> fragment
-vColor :: Func
+vColor :: Opaque
 vColor = varying TV4 "vColor"
 
 -- | Simple expr, corresponding to vec2(1,2) (a vector of ints)
@@ -40,27 +40,27 @@ expr1 :: Expr
 expr1 = V2 (I 1, I 2)
 
 -- | Attribute corresponding to a vertex pos passed in at the start of a vertex shader, w/ default vals
-aVertPos :: Func
+aVertPos :: Opaque
 aVertPos = attribute TV4 "aVertPos"
 
 -- | Varying x and Y vector that will be passed to fragment shader, w/ default 0 vals
-vXY :: Func
+vXY :: Opaque
 vXY = varying TV2 "vXY"
 
 -- | Varying x,y,z vector that passes to the fragment shader
-vXYZ :: Func
+vXYZ :: Opaque
 vXYZ = varying TV3 "vXYZ"
 
 -- | Uniform Projection matrix (used for model-view-projection)
-uProjectionMatrix :: Func
+uProjectionMatrix :: Opaque
 uProjectionMatrix = uniform TMat4 "uProjectionMatrix"
 
 -- | Uniform Model View matrix (used for model-view-projection)
-uModelViewMatrix :: Func
+uModelViewMatrix :: Opaque
 uModelViewMatrix = uniform TMat4 "uModelViewMatrix"
 
 -- | Time passed into the shader
-uTime :: Func
+uTime :: Opaque
 uTime = uniform TF "uTime"
 
 --
@@ -110,8 +110,8 @@ timeFrag = Shader FragShader [vXYZ] []
 
 -- | Simple shader program that shows RGB color values on a surface
 prog1 :: Maybe Prog
-prog1 = comp basicVert mvpVert >>= \v -> Just $ Prog [uProjectionMatrix,uModelViewMatrix,fInc] [aVertPos] v posFrag
+prog1 = comp basicVert mvpVert >>= \v -> Just $ Prog [uProjectionMatrix,uModelViewMatrix] [(Nothing, fInc)] v posFrag
 
 -- | More complex shader, color & shape changes over time
 prog2 :: Maybe Prog
-prog2 = comp basicVert timeVert >>= \v -> Just $ Prog [uProjectionMatrix,uModelViewMatrix,fInc,uTime] [aVertPos] v timeFrag
+prog2 = comp basicVert timeVert >>= \v -> Just $ Prog [uProjectionMatrix,uModelViewMatrix,uTime] [(Nothing, fInc)] v timeFrag
