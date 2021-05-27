@@ -19,6 +19,58 @@ GlobalEnv -> PriorResultEnv -> (ShaderEnv,Expr) -> ShaderResultEnv
 ```
 To explain this, a global environment is shared across all shaders. Each shader also gets results that are passed to it from a prior stage, which is produced by some prior step that is not known in advance. Finally, every shader has its own environment and an expression to evaluation in that environment. The result of evaluating this shader produces a result environment, which is then fed into the next stage (if there is a following stage).
 
+## Instructions to Run
+
+This project uses Stack now. Running this program results in a simple shader program
+(Vertex + Fragment) outputted to STDOUT. To run these example shader programs, we've written up a simple webpage to test them in, [https://www.uphouseworks.com/fdssl-test.html](https://www.uphouseworks.com/fdssl-test.html).
+
+To run with stack, you can use:
+```
+stack run
+```
+Which will build and run the executable, and output two resulting shaders (a vertex and a fragment shader).
+
+To dynamically run it, you can run the following in your terminal
+```
+stack ghci
+```
+once that's finished, you can evaluate some FDSSL programs like so
+```
+> evalProg "examples/e0.txt"
+> evalProg "examples/e1.txt"
+> evalProg "examples/e2.txt"
+```
+Each of these is a valid FDSSL program, but only the first two produce actual shaders. The last is more a test file.
+
+## Structure
+
+The structure of FDSSL is:
+- `Examples`: various vertex & fragment shaders written in FDSSL, with a pair of example programs
+- `Main`: easiest way to run and print shader programs
+- `Pretty`: our pretty printer
+- `Syntax`: Holds the abstract syntax for FDSSL
+- `Parser`: Holds the parser for FDSSL
+- `TypeChecker`: Empty, but will hold our type checker for programs written in FDSSL abstract syntax
+
+## Milestone 2 (May 26th)
+
+### Progress
+
+- We have implemented a Parser using [parsec](https://hackage.haskell.org/package/parsec-3.1.14.0)
+    - Through parsec, we have utiilzed parser-combinators, to create multiple separate parsers that when combined can parse a full FDSSL program. This has helped considerably with our concrete syntax
+    - Parsec also provides a nice monad transformer stack, allowing us to use the State monad to great effect while parsing. Specifically, we can keep track of the uniforms, functions, and shaders that have been parsed along the way, allowing us to have all the proper references to create final programs.
+- We sat down and tried to write what we thought would make good FDSSL programs. We have then used these programs as the basis to advise the parser itself. We initially sketched a formal specification, but found this was too abstract to determine what our requirements would be and what would look good in practice.
+
+### What we're still working on
+
+- Using the example programs we have, a semi-formalization of the concrete syntax through the parser, and our old grammar, we would like to rewrite a new grammar to formalize the language specification as it is now.
+
+### Questions
+
+...
+
+## Milestone 1 (May 12th)
+
 ## Progress
 
 - We have written up an abstract syntax for FDSSL
@@ -55,23 +107,3 @@ Functions, as defined in our context via `Func`, are used generally to define al
 
 #### We're thinking of using Monads to help sequence composition, but...
 ...our shaders are not parameterized by any type. We're thinking maybe we can change this, or that we can use the example Eric brought up in class about 'describing a plan' for a computation, rather than performing the computation itself. We think we can use our semantic domain to achieve this, or some form of it, but we're open to feedback about how we might go about it. Also, we're thinking this might be helpful for functions, since they are effectful as well.
-
-## Instructions to Run
-
-This project uses Cabal, but you can just as easily use `ghci src/*.hs` if you have everything installed. Running this program results in a simple shader program
-(Vertex + Fragment) outputted to STDOUT. To run these example shader programs, we've written up a simple webpage to test them in, [https://www.uphouseworks.com/fdssl-test.html](https://www.uphouseworks.com/fdssl-test.html).
-
-To run with cabal, you can use:
-```
-cabal run
-```
-Which will build and run the executable, and output two resulting shaders (a vertex and a fragment shader).
-
-If you are interested in dynamically running it, you can use either `cabal repl` or `ghci src/*.hs` instead. From here, you can run `main`, producing the same output as before, or you can run `main2` to produce a different shader program. This new program will correspond to a dynamic shader that transforms positions and colors over time.
-
-The structure of FDSSL is:
-- `Examples`: various vertex & fragment shaders written in FDSSL, with a pair of example programs
-- `Main`: easiest way to run and print shader programs
-- `Pretty`: our pretty printer
-- `Syntax`: Holds the abstract syntax for FDSSL
-- `TypeChecker`: Empty, but will hold our type checker for programs written in FDSSL abstract syntax
