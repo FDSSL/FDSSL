@@ -61,13 +61,15 @@ The structure of FDSSL is:
     - Parsec also provides a nice monad transformer stack, allowing us to use the State monad to great effect while parsing. Specifically, we can keep track of the uniforms, functions, and shaders that have been parsed along the way, allowing us to have all the proper references to create final programs.
 - We sat down and tried to write what we thought would make good FDSSL programs. We have then used these programs as the basis to advise the parser itself. We initially sketched a formal specification, but found this was too abstract to determine what our requirements would be and what would look good in practice.
 - We have rewritten parts of our syntax from before based on the program structure in our example programs. The result is a tad more imperative, but it has revealed limitations in our language that required further change.
-- Composition of Shaders is implemented in such a way that it is *not* an expression, but a higher level construct only for building Shaders. Although odd at first, this choice works considering that shaders are not expressions in our language. The resulting shader is an abstract representation of the sequenced execution of both shaders, and also combines their effects.
-- Shaders a written in our concrete syntax a functions that describes named inputs *and* named outputs (if any) along with an expression body. We believe this helps capture the idea that Shaders are functions with explicit side-effects that will impact the next shader down the line (if there is another shader).
-- We are using Opaque Types in the abstract syntax of FDSSL to hide away the notion of uniform/attribute/varying qualifiers on types in GLSL. This helps keep the concrete syntax very simple type-wise, especially for those who are unfamiliar with GLSL. 
+- Composition of Shaders is implemented in such a way that it is *not* an expression, but a higher level construct only for building Shaders. Although odd at first, this choice works considering that shaders are not expressions in our language. The resulting shader is an abstract representation of the sequenced execution of both shaders, and also combines their effects. This behavior is not unlike the bind operation for the State monad.
+- Shaders are written in our concrete syntax as functions that describe named inputs *and* named outputs (if any) along with an expression body. We believe this helps capture the idea that Shaders are functions with explicit side-effects that will impact the next shader down the line (if there is another shader).
+- We are using Opaque Types in the abstract syntax of FDSSL to hide away the notion of uniform/attribute/varying qualifiers on types in GLSL. This helps keep the concrete syntax very simple type-wise, especially for those who are unfamiliar with GLSL.
+- In the way we have written our parser, we have made it possible to express multiple shaders in the same program, as we planned in our initial proposal. However, we have also managed to make it so that multiple GLSL programs can be written from a single FDSSL program, giving further flexibility.
 
 ### What we're still working on
 
-- The pretty printer needs to be changed to properly account for the recently changed syntax, this will fix the currently busted shaders
+- We plan to write the resulting GLSL programs to output files, instead of the terminal output
+- The shader output is currently broken from the last parser & syntax changes. The pretty printer needs to be changed to properly account for this.
 - Using the example programs we have, a semi-formalization of the concrete syntax through the parser, and our old grammar, we would like to rewrite a new grammar to formalize the language specification as it is now.
 - Composition of Functions works in the abstract syntax, but still needs to be expressible in the concrete syntax
 - The parser needs to be refined to handle some edge cases
