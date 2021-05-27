@@ -174,7 +174,7 @@ parseParam =
 
 -- | Parse several params
 parseParams :: Parser ([(String,Type)])
-parseParams = parens $ commaSep2 $ parseParam
+parseParams = parens $ commaSep1 $ parseParam
 
 -- | Parse a uniform
 parseUniform :: Parser ()

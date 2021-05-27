@@ -16,5 +16,6 @@ evalProg fn = do
     (Left l)  -> putStrLn $ show l
     (Right progList) -> mapM_ putStrLn $ map (pretty . snd) progList
 
-main2 :: IO ()
-main2 = putStrLn $ prettySafe prog2
+-- needs fixing or removal
+-- main2 :: IO ()
+-- main2 = putStrLn $ prettySafe prog2
