@@ -53,33 +53,34 @@ data Type =
 
 
 data Expr =
-  Mut Type String Expr Expr    | -- mutable binding
-  Const Type String Expr Expr    | -- const binding
-  Update String Expr Expr | -- updating of an env variable (effectful, and may be the last statement)
-  Out String Expr Expr | -- akin to update, but ONLY for return values in shaders
-  Branch Expr Expr Expr       | -- branching
-  For Expr (Maybe String) Expr Expr  | -- produces a value from evaluating expr 'int' times, e.x. let x = 1+x \n let x = 1+x \n ... let x = 1+x \n x (optional index name can be given after do
-  SComment String Expr         | -- single-line comment
-  BComment String Expr         | -- block comment
-  Seq Expr Expr | -- sequence 2 top-level exprs (statements), used to join statements together across shaders together (composition)
-  NOp | -- nop
-  I Int  |    -- literal int
-  B Bool |    -- bool
-  F Float |   -- float
-  D Double |  -- double
-  V2 (Expr,Expr) |            -- vec2
-  V3 (Expr,Expr,Expr) |       -- vec3
-  V4 (Expr,Expr,Expr,Expr) |  -- vec4
-  Mat4 (Matrix Expr) |        -- mat4, as any size for now, TODO we'll fix this later
-  Array [Expr] |          -- lists, which correspond to arrays
-  Ref String            | -- reference (corresponds to let bound var OR function w/ no args (global ref))
-  App String [Expr] Expr | -- prefix app
-  BinOp BOp Expr Expr   | -- infix app
-  AccessN String String | -- structure access by name
-  AccessI String Int      -- structure access by index
+  Mut Type String Expr            | -- mutable binding
+  Const Type String Expr          | -- const binding
+  Update String Expr              | -- updating of an env variable (effectful, and may be the last statement)
+  Out String Expr                 | -- akin to update, but ONLY for return values in shaders
+  Branch Expr Block Block       | -- branching
+  For Expr (Maybe String) Block  | -- produces a value from evaluating expr 'int' times, e.x. let x = 1+x \n let x = 1+x \n ... let x = 1+x \n x (optional index name can be given after do
+  SComment String                 | -- single-line comment
+  BComment String                 | -- block comment
+  NOp                             | -- nop
+  I Int                           |    -- literal int
+  B Bool                          |    -- bool
+  F Float                         |   -- float
+  D Double                        |  -- double
+  V2 (Expr,Expr)                  |            -- vec2
+  V3 (Expr,Expr,Expr)             |       -- vec3
+  V4 (Expr,Expr,Expr,Expr)        |  -- vec4
+  Mat4 (Matrix Expr)              |        -- mat4, as any size for now, TODO we'll fix this later
+  Array [Expr]                    |          -- lists, which correspond to arrays
+  Ref String                      | -- reference (corresponds to let bound var OR function w/ no args (global ref))
+  App String [Expr]               | -- prefix app
+  BinOp BOp Expr Expr             | -- infix app
+  AccessN String String           | -- structure access by name
+  AccessI String Int                -- structure access by index
 
 -- env is a list of functions
 type Env = [Opaque]
+type Block = [Expr]
+
 type Funcs = [(Maybe ShaderType, Func)]
 
 data ShaderType = VertShader | FragShader
@@ -90,7 +91,7 @@ data Shader = Shader {
   shaderType :: ShaderType,
   inEnv :: Env,
   outEnv :: Env,
-  shaderBody :: Expr
+  shaderBody :: [Expr]
   }
 
 guard :: Bool -> Maybe ()
@@ -115,8 +116,7 @@ instance Composable Shader where
                  guard (shaderType s == shaderType s')
                  ine  <- comp (inEnv s)  (inEnv s')
                  oute <- comp (outEnv s) (outEnv s')
-                 let bod = Seq (shaderBody s) (shaderBody s')
-                 return $ Shader (shaderType s) ine oute bod
+                 return $ Shader (shaderType s) ine oute (shaderBody s ++ shaderBody s')
 
 
 -- program is a Global Env + Attr Env + Vertex Shader + Fragment Shader
@@ -131,13 +131,13 @@ data Opaque = Opaque {
   }
 
 -- top-level exprs, similar to statements
-data Ret = Body Expr String
 
 -- func has a name, a list of name-type pairs, it's result type, and an expr
-data Func = Func String [(String,Type)] Type Ret
+data Func = Func String [(String,Type)] Type Block
 
-apply :: (Expr -> Expr) -> Func -> Func
-apply f (Func n p t (Body b r)) = Func n p t (Body (f b) r)
+apply :: (Block -> Block) -> Func -> Func
+apply f (Func n p t b) = Func n p t (f b)
+
 
 instance Eq Opaque where
   (==)    Opaque{opaqueName = on} Opaque{opaqueName = on'} = on == on'

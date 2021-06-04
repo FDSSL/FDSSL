@@ -1,7 +1,11 @@
+{-# LANGUAGE FlexibleInstances #-}
+
+
 module Pretty where
 
 import Syntax
 import Data.List
+import Control.Monad
 
 instance Show Type where
   show TI = "int"
@@ -34,59 +38,96 @@ instance Show BOp where
   show BitXor = " ^ "
 
 instance Show Expr where
-  show (Mut t n e e') = show t ++ " " ++ n ++ " = " ++ show e ++ ";\n" ++ show e'
-  show (Const t n e e') = "const " ++ show t ++ " " ++ n ++ " = " ++ show e ++ ";\n" ++ show e'
+  show (Mut t n e) = show t ++ " " ++ n ++ " = " ++ show e ++ ";\n"
+  show (Const t n e) = "const " ++ show t ++ " " ++ n ++ " = " ++ show e ++ ";\n"
 
   -- internally, the same
-  show (Update n e e') = n ++ " = " ++ show e ++ ";\n" ++ show e'
-  show (Out n e e') = n ++ " = " ++ show e ++ ";\n" ++ show e'
+  show (Update n e) = n ++ " = " ++ show e ++ ";\n"
+  show (Out n e) = n ++ " = " ++ show e ++ ";\n"
 
   show NOp = ""
-  show (Branch c t e) = "if (" ++ show c ++ ") {\n" ++ show t ++ "\n} else {\n" ++ show e ++ "\n}\n"
-  show (For i (Just n) e t) = "for (int " ++ n ++ " = 0; n < " ++ show i ++ "; "++n++"="++n++"+1) {\n" ++ show e ++ "\n}\n" ++ show t
-  show (For i Nothing e t) = "for (int fdssl_cntr = 0; fdssl_cntr < " ++ show i ++ "; fdssl_cntr=fdssl_cntr+1) {\n" ++ show e ++ "\n}\n" ++ show t
-  show (SComment s e) = "// " ++ s ++ "\n" ++ show e
-  show (BComment s e) = "/* " ++ s ++ " */\n" ++ show e
-  show (Seq t t') = show t ++ "\n" ++ show t'
+  show (Branch c t e) = "if (" ++ show c ++ "){\n" ++ show t ++ "}\nelse {\n" ++ show e ++ "\n}\n"
+  show (For i (Just n) e) = "for (int " ++ n ++ " = 0; n < " ++ show i ++ "; "++n++"="++n++"+1) {\n" ++ show e ++ "\n}\n"
+  show (For i Nothing e) = "for (int fdssl_cntr = 0; fdssl_cntr < " ++ show i ++ "; fdssl_cntr=fdssl_cntr+1) {\n" ++ show e ++ "\n}\n"
+  show (SComment s) = "// " ++ s ++ "\n"
+  show (BComment s) = "/* " ++ s ++ " */\n"
   show (I i) = show i
   show (B b) = if b then "true" else "false"
   show (F f) = show f
   show (D d) = show d
-  show (V2 (a,b)) = "vec2(" ++ showParams [a,b] ++ ")"
-  show (V3 (a,b,c)) = "vec3(" ++ showParams [a,b,c] ++ ")"
-  show (V4 (a,b,c,d)) = "vec4(" ++ showParams [a,b,c,d] ++ ")"
+  show (V2 (a,b)) = "vec2" ++ showParams [a,b]
+  show (V3 (a,b,c)) = "vec3" ++ showParams [a,b,c]
+  show (V4 (a,b,c,d)) = "vec4" ++ showParams [a,b,c,d]
   show (Mat4 m) = "??? mat4 isn't done yet ???"
   show (Ref r) = r
-  show (App n ls e) = n ++ "(" ++ showParams ls ++ ");\n" ++ show e
-  show (BinOp b e e') = show e ++ show b ++ show e'
-  show (AccessN s n) = s ++ "." ++ n
-  show (AccessI s i) = s ++ "[" ++ show i ++ "]"
+  show (App n ls) = n ++  show ls ++ ";\n"
+  show (BinOp b e e') = mconcat . intersperse " " $ [show e, show b, show e']
+  show (AccessN s n) = mconcat [s, ".", n]
+  show (AccessI s i) = mconcat [s, "[", show i, "]"]
   show _ = error "Undefined Expr present! Invalid program"
-
-instance Show Ret where
-  show (Body e "") = "return " ++ show e ++ ";" -- Body should be changed here, perhaps another parameter, a Ref?
-  show (Body e r) = show e ++ "\nreturn " ++ r ++ ";"
 
 instance Show OpaqueType where
   show Uniform   = "uniform"
   show Attribute = "attribute"
   show Varying   = "varying"
 
-
 instance Show Opaque where
   show (Opaque ot t n) = (++";\n") . mconcat $ intersperse " " $ [show ot, show t, n]
 
 instance Show Func where
-  show (Func f ls t b) = show t ++ " " ++ f ++ "(" ++ concat (intersperse "," (map (\(n,t') -> show t' ++ " " ++ n) ls)) ++ ") {\n" ++ show b ++ "\n}\n"
+  show (Func f ls t b) = case prettyBlock b of
+                           Just body -> prettyType f t ++ showParams ls ++ "{\n" ++ body ++ "}\n"
+                           Nothing -> "// Function " ++ show f ++ " failed to parse"
 
+instance {-# OVERLAPS #-} Show (String, Type) where
+  show (n, t) = show t ++ " " ++ n
+
+isImm :: Expr -> Bool
+isImm (I _) = True
+isImm (B _) = True
+isImm (F _) = True
+isImm (D _) = True
+isImm (V2 _) = True
+isImm (V3 _) = True
+isImm (V4 _) = True
+isImm (Mat4 _) = True
+isImm (Ref _) = True
+isImm (AccessN _ _) = True
+isImm (AccessI _ _) = True
+isImm (BinOp _ _ _) = True
+isImm _ = False
+
+
+applyIf :: Bool -> (a -> a) -> a -> a
+applyIf True  = ($)
+applyIf False = flip const
+
+nothingIf :: Bool -> a -> Maybe a
+nothingIf True  = const Nothing
+nothingIf False = Just
+
+prettyType :: String -> Type -> String
+prettyType n t = (show t) ++ " " ++ n
+
+prettyBlock :: Block -> Maybe String
+prettyBlock (e:[]) = Just $ applyIf (isImm e) ret (show e)
+prettyBlock (e:es) = liftM2 (++) (nothingIf (isImm e) (show e)) (prettyBlock es)
+prettyBlock [] = Just ""
+
+--prettyBlock (e:es) = return (show e) >>= \s -> prettyBlock es >>= \ss -> return (s ++ ss)
+
+ret :: String -> String
+ret s = "return " ++ s ++ ";\n"
 
 prettyFuncs :: ShaderType -> (Maybe ShaderType, Func) -> String
 prettyFuncs typ (Just ftyp, f) = if typ == ftyp then show f else ""
 prettyFuncs _   (Nothing,   f) = show f
 
-showParams :: [Expr] -> String
-showParams ls = concat (intersperse "," (map show ls))
+showParams :: Show a => [a] -> String
+showParams =  concat . wrapList "(" ")" . intersperse ", " . map show
 
+wrapList :: a -> a -> [a] -> [a]
+wrapList l r es = [l] ++ es ++ [r]
 
 -- | Pretty print a Top level expression (really a statement)
 prettyE :: Expr -> String
@@ -98,7 +139,7 @@ wrapMain s = "void main() {\n" ++ s ++ "\n}"
 
 -- | Pretty print any general shader
 prettyShader :: Shader -> String
-prettyShader (Shader _ env1 env2 e) = prettyEnv env1 ++ "\n" ++ prettyEnv env2 ++ "\n" ++ wrapMain (prettyE e)
+prettyShader (Shader _ env1 env2 e) = prettyEnv env1 ++ "\n" ++ prettyEnv env2 ++ "\n" ++ wrapMain (show e)
 
 -- | Pretty print an env w/ a given function and an Env (aka a list of Functions)
 --prettyEnv :: (Func -> String) -> Env -> String

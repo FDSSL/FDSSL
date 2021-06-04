@@ -25,7 +25,7 @@ e4 = Prog [fInc] [aAttr] (VertShader [vColor] (Mut TB "x" (B False) (Branch ((Re
 
 -- | Example function, that add increments it's arg by 1
 fInc :: Func
-fInc = Func "inc" [("x",TI)] TI (Body (BinOp Add (Ref "x") (I 1)) "")
+fInc = Func "inc" [("x",TI)] TI [(BinOp Add (Ref "x") (I 1))]
 
 -- | Example attribute passed into vertex shader
 aAttr :: Opaque
@@ -69,17 +69,27 @@ uTime = uniform TF "uTime"
 
 -- Basic vertex shader, just passes along the coordinates without applying any matrix transformations
 basicVert :: Shader
-basicVert = Shader VertShader [] [vXYZ] (Update "gl_Position" (Ref "aVertPos") (Out "vXYZ" (V3 (AccessN "aVertPos" "x",AccessN "aVertPos" "y",AccessN "aVertPos" "z")) NOp))
+basicVert = Shader VertShader [] [vXYZ] [
+  Update "gl_Position" (Ref "aVertPos"),
+  Out "vXYZ" (V3 (AccessN "aVertPos" "x", AccessN "aVertPos" "y", AccessN "aVertPos" "z"))
+  ]
 
 -- Vertex shader that applies a model view projection matrix to the position
 mvpVert :: Shader
-mvpVert = Shader VertShader [aVertPos] [] (Update "gl_Position" (BinOp Mul (Ref "uProjectionMatrix") (BinOp Mul (Ref "uModelViewMatrix") (Ref "aVertPos"))) NOp)
+mvpVert = Shader VertShader [aVertPos] [] [
+  Update "gl_Position" (BinOp Mul (Ref "uProjectionMatrix") (BinOp Mul (Ref "uModelViewMatrix") (Ref "aVertPos")))
+  ]
 
 -- Alter position over time, also does MVP projections
 timeVert :: Shader
-timeVert = Shader VertShader [aVertPos] [vXYZ]
-  (Mut TV4 "pos" (V4 (BinOp Mul (AccessN "aVertPos" "x") (App "sin" [Ref "uTime"] NOp), BinOp Mul (AccessN "aVertPos" "y") (App "cos" [Ref "uTime"] NOp), AccessN "aVertPos" "z", AccessN "aVertPos" "w"))
-  (Update "gl_Position" (BinOp Mul (Ref "uProjectionMatrix") (BinOp Mul (Ref "uModelViewMatrix") (Ref "pos"))) NOp))
+timeVert = Shader VertShader [aVertPos] [vXYZ] [
+    Mut TV4 "pos" (V4
+                   (BinOp Mul (AccessN "aVertPos" "x") (App "sin" [Ref "uTime"]),
+                    BinOp Mul (AccessN "aVertPos" "y") (App "cos" [Ref "uTime"]),
+                    AccessN "aVertPos" "z",
+                    AccessN "aVertPos" "w")),
+    Update "gl_Position" (BinOp Mul (Ref "uProjectionMatrix") (BinOp Mul (Ref "uModelViewMatrix") (Ref "pos")))
+ ]
 
 --
 -- Fragment Shaders
@@ -87,23 +97,24 @@ timeVert = Shader VertShader [aVertPos] [vXYZ]
 
 -- Fragment shader that produces a gray coloring everywhere
 defaultFrag :: Shader
-defaultFrag = Shader FragShader [] [] (Update "gl_FragColor" (V4 (F 0.5, F 0.5, F 0.5, F 1.0)) NOp)
+defaultFrag = Shader FragShader [] [] [Update "gl_FragColor" (V4 (F 0.5, F 0.5, F 0.5, F 1.0))]
 
 -- Fragment shader that changes color based on position
 posFrag :: Shader
-posFrag = Shader FragShader [vXYZ] []
-  (Mut TF "r" (AccessN "vXYZ" "x")
-  (Mut TF "g" (AccessN "vXYZ" "y")
-  (Mut TF "b" (AccessN "vXYZ" "z")
-  (Update "gl_FragColor" (V4 (Ref "r", Ref "g", Ref "b", F 1.0)) NOp))))
+posFrag = Shader FragShader [vXYZ] [] [
+  Mut TF "r" (AccessN "vXYZ" "x"),
+  Mut TF "g" (AccessN "vXYZ" "y"),
+  Mut TF "b" (AccessN "vXYZ" "z"),
+  Update "gl_FragColor" (V4 (Ref "r", Ref "g", Ref "b", F 1.0))
+  ]
 
 timeFrag :: Shader
-timeFrag = Shader FragShader [vXYZ] []
-  (Mut TF "r" (BinOp Add (AccessN "vXYZ" "x") (App "cos" [Ref "uTime"] NOp))
-  (Mut TF "g" (BinOp Add (AccessN "vXYZ" "y") (App "sin" [Ref "uTime"] NOp))
-  (Mut TF "b" (AccessN "vXYZ" "z")
-  (Update "gl_FragColor" (V4 (Ref "r", Ref "g", Ref "b", F 1.0)) NOp))))
-
+timeFrag = Shader FragShader [vXYZ] [] [
+  Mut TF "r" (BinOp Add (AccessN "vXYZ" "x") (App "cos" [Ref "uTime"])),
+  Mut TF "g" (BinOp Add (AccessN "vXYZ" "y") (App "sin" [Ref "uTime"])),
+  Mut TF "b" (AccessN "vXYZ" "z"),
+  Update "gl_FragColor" (V4 (Ref "r", Ref "g", Ref "b", F 1.0))
+  ]
 --
 -- Programs
 --
