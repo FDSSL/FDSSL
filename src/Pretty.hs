@@ -139,7 +139,7 @@ wrapMain s = "void main() {\n" ++ s ++ "\n}"
 
 -- | Pretty print any general shader
 prettyShader :: Shader -> String
-prettyShader (Shader _ env1 env2 e) = prettyEnv env1 ++ "\n" ++ prettyEnv env2 ++ "\n" ++ wrapMain (show e)
+prettyShader (Shader _ env1 env2 e) = prettyEnv env1 ++ "\n" ++ prettyEnv env2 ++ "\n" ++ wrapMain (concatMap show e)
 
 -- | Pretty print an env w/ a given function and an Env (aka a list of Functions)
 --prettyEnv :: (Func -> String) -> Env -> String
