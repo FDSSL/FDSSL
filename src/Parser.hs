@@ -21,8 +21,11 @@ data PState = PState {
   progs    :: [(String,Prog)]  -- programs parsed along the way
 }
 
-translate :: String -> a -> Parser a
-translate s a = reserved s *> return a
+consume :: (String, a)-> Parser a
+consume (s,a) = reserved s *> return a
+
+listTrans :: [(String, a)] -> Parser a
+listTrans = choice . map consume
 
 initialState :: PState
 initialState = PState [] [] [] []
@@ -156,22 +159,16 @@ brackets = P.brackets lexer
 
 -- | Parse a type
 parseType :: Parser (Type)
-parseType =
-  reserved "Int" *> return TI
-  <|>
-  reserved "Bool" *> return TB
-  <|>
-  reserved "Float" *> return TF
-  <|>
-  reserved "Vec2" *> return TV2
-  <|>
-  reserved "Vec3" *> return TV3
-  <|>
-  reserved "Vec4" *> return TV4
-  <|>
-  reserved "Mat4" *> return TMat4
-  <|>
-  reserved "Array" *> return TArray
+parseType = listTrans [
+    ("Int", TI),
+    ("Bool", TB),
+    ("Float", TF),
+    ("Vec2", TV2),
+    ("Vec3", TV3),
+    ("Vec4", TV4),
+    ("Mat4", TMat4),
+    ("Array", TArray)
+    ]
 
 -- | Parse a single param, used for function input
 parseParam :: Parser (String,Type)
@@ -228,8 +225,9 @@ parseShaderSignature =
     DT.traceM $ "T2 obtained as" ++ show t2
     return (t1,t2)
 
-bops :: [(String,BOp)]
-bops = [
+
+parseBOp :: Parser (BOp)
+parseBOp = listTrans [
   ("+", Add),
   ("-", Sub),
   ("*", Mul),
@@ -245,26 +243,26 @@ bops = [
   ("<", Lt)
   ]
 
-parseBOp :: Parser (BOp)
-parseBOp = let (p:ps) = map (uncurry translate) bops in foldl (<|>) p ps
-
   -- TODO no bitwise ops in here yet
+
+parseBlock :: Parser [Expr]
+parseBlock = braces $ many1 parseExpr
 
 -- | Parse an expr
 parseExpr' :: Parser (Expr)
 parseExpr' =
   DT.trace "parsing expression..." $
-  Mut <$> (reserved "mut" *> parseType) <*> lowIdentifier <*> (reserved "=" *> parseExpr) <*> parseExpr
+  Mut <$> (reserved "mut" *> parseType) <*> lowIdentifier <*> (reserved "=" *> parseExpr)
   <|>
-  Const <$> (reserved "const" *> parseType) <*> lowIdentifier <*> (reserved "=" *> parseExpr) <*> parseExpr
+  Const <$> (reserved "const" *> parseType) <*> lowIdentifier <*> (reserved "=" *> parseExpr)
   <|>
-  Update <$> (reserved "set" *> lowIdentifier) <*> parseExpr <*> parseExpr
+  Update <$> (reserved "set" *> lowIdentifier) <*> parseExpr
   <|>
-  Out <$> (reserved "out" *> lowIdentifier) <*> parseExpr <*> parseExpr
+  Out <$> (reserved "out" *> lowIdentifier) <*> parseExpr
   <|>
-  Branch <$> (reserved "if" *> parseExpr) <*> (reserved "then" *> (reserved "{" *> parseExpr <* reserved "}")) <*> (reserved "else" *> (reserved "{" *> parseExpr <* reserved "}"))
+  Branch <$> (reserved "if" *> parseExpr) <*> (reserved "then" *> parseBlock) <*> (reserved "else" *> parseBlock)
   <|>
-  For <$> (reserved "for" *> parseExpr) <*> (reserved "do" *> return Nothing) <*> (reserved "{" *> parseExpr <* reserved "}") <*> parseExpr
+  For <$> (reserved "for" *> parseExpr) <*> (consume ("do", Nothing)) <*> parseBlock
   -- <|>
   -- SComment <$> (string "//" *> manyTill anyChar newline) <*> parseExpr
   -- <|>
@@ -277,9 +275,7 @@ parseExpr' =
   <|>
   I <$> int
   <|>
-  B <$> (reserved "true" *> return True)
-  <|>
-  B <$> (reserved "false" *> return False)
+  B <$> listTrans [("true", True), ("false", False)]
   <|>
   do
     DT.traceM "parsing vec4..."
@@ -321,8 +317,7 @@ parseExpr' =
       es <- parens (many1 parseExpr)
       DT.traceM $ "App name is " ++ i
       DT.traceM $ "App list is " ++ (show es)
-      e <- parseExpr
-      return $ App i es e
+      return $ App i es
   )
   --try (App <$> lowIdentifier <*> parens (commaSep1 parseExpr) <*> return NOp)
   <|>
@@ -357,10 +352,8 @@ parseFunc =
     (params,typ) <- parseFuncSignature
     DT.traceM $ "Func signature parts are " ++ show params ++ " and " ++ show typ
     reservedOp "="
-    reservedOp "{"
-    expr <- parseExpr
-    reservedOp "}"
-    let f = Func name params typ (Body expr "")
+    expr <- braces $ many1 parseExpr
+    let f = Func name params typ expr
     -- update the state with this function
     addFunc f
     return ()
@@ -372,7 +365,7 @@ toVarying (s,t) = Opaque Varying t s
 parseShader :: Parser ()
 parseShader = try $ do
   DT.traceM "parsing shader..."
-  t <- ((reserved "vert" *> return VertShader) <|> (reserved "frag" *> return FragShader))
+  t <- listTrans [("vert", VertShader), ("frag", FragShader)]
   DT.traceM $ "Shader type is " ++ (show t)
   n <- lowIdentifier
   DT.traceM $ "Shader name <<>> is " ++ n
@@ -381,7 +374,7 @@ parseShader = try $ do
   DT.traceM $ "Shader signature parsed, " ++ show e1 ++ show e2
   whitespace
   reservedOp "="
-  e <- braces parseExpr
+  e <- parseBlock
   DT.traceM $ "Expr parsed as " ++ show e
   let shader = Shader t (map toVarying e1) (map toVarying e2) e
   -- add this shader to the env
@@ -392,7 +385,7 @@ parseShader = try $ do
 parseCompShader :: Parser ()
 parseCompShader = try $ do
   DT.traceM "parsing shader..."
-  t <- ((reserved "vert" *> return VertShader) <|> (reserved "frag" *> return FragShader))
+  t <- listTrans [("vert", VertShader), ("frag", FragShader)]
   DT.traceM $ "Shader type is " ++ (show t)
   n <- lowIdentifier
   DT.traceM $ "Shader name is " ++ n
