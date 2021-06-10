@@ -153,8 +153,10 @@ reservedOp = P.reservedOp lexer
 parens :: ParsecT String u Identity a -> ParsecT String u Identity a
 parens = P.parens lexer
 
+braces :: ParsecT String u Identity a -> ParsecT String u Identity a
 braces = P.braces lexer
 
+brackets :: ParsecT String u Identity a -> ParsecT String u Identity a
 brackets = P.brackets lexer
 
 -- | Parse a type
@@ -328,8 +330,7 @@ parseExpr' =
   DT.trace "trying ref..." (try (Ref <$> (lowIdentifier <* notFollowedBy (reserved "[" <|> reserved "("))))
   <|>
   parens (parseExpr <* notFollowedBy comma) -- expr wrapped in parens, which is ok, but not part of list of sorts...
-  <|>
-  DT.trace "checking NOp..." (lookAhead (try $ reservedOp "}") *> return NOp) -- Nop is used to cap off when there's nothing else left here...
+
   -- -- <|>
   -- -- important that this goes LAST, otherwise binops will infinitely evaluate exprs forever...
   -- do
@@ -352,7 +353,7 @@ parseFunc =
     (params,typ) <- parseFuncSignature
     DT.traceM $ "Func signature parts are " ++ show params ++ " and " ++ show typ
     reservedOp "="
-    expr <- braces $ many1 parseExpr
+    expr <- parseBlock
     let f = Func name params typ expr
     -- update the state with this function
     addFunc f
