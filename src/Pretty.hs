@@ -46,9 +46,9 @@ instance Show Expr where
   show (Out n e) = n ++ " = " ++ show e ++ ";\n"
 
   show NOp = ""
-  show (Branch c t e) = "if (" ++ show c ++ "){\n" ++ show t ++ "}\nelse {\n" ++ show e ++ "\n}\n"
-  show (For i (Just n) e) = "for (int " ++ n ++ " = 0; n < " ++ show i ++ "; "++n++"="++n++"+1) {\n" ++ show e ++ "\n}\n"
-  show (For i Nothing e) = "for (int fdssl_cntr = 0; fdssl_cntr < " ++ show i ++ "; fdssl_cntr=fdssl_cntr+1) {\n" ++ show e ++ "\n}\n"
+  show (Branch c t e) = "if (" ++ show c ++ "){\n" ++ prettyBlock t ++ "}\nelse {\n" ++ prettyBlock e ++ "\n}\n"
+  show (For i (Just n) e) = "for (int " ++ n ++ " = 0; n < " ++ show i ++ "; "++n++"="++n++"+1) {\n" ++ prettyBlock e ++ "\n}\n"
+  show (For i Nothing e) = "for (int fdssl_cntr = 0; fdssl_cntr < " ++ show i ++ "; fdssl_cntr=fdssl_cntr+1) {\n" ++ prettyBlock e ++ "\n}\n"
   show (SComment s) = "// " ++ s ++ "\n"
   show (BComment s) = "/* " ++ s ++ " */\n"
   show (I i) = show i
@@ -60,7 +60,7 @@ instance Show Expr where
   show (V4 (a,b,c,d)) = "vec4" ++ showParams [a,b,c,d]
   show (Mat4 m) = "??? mat4 isn't done yet ???"
   show (Ref r) = r
-  show (App n ls) = n ++  show ls ++ ";\n"
+  show (App n ls) = n ++ showParams ls ++ ";\n"
   show (BinOp b e e') = mconcat . intersperse " " $ [show e, show b, show e']
   show (AccessN s n) = mconcat [s, ".", n]
   show (AccessI s i) = mconcat [s, "[", show i, "]"]
@@ -75,9 +75,7 @@ instance Show Opaque where
   show (Opaque ot t n) = (++";\n") . mconcat $ intersperse " " $ [show ot, show t, n]
 
 instance Show Func where
-  show (Func f ls t b) = case prettyBlock b of
-                           Just body -> prettyType f t ++ showParams ls ++ "{\n" ++ body ++ "}\n"
-                           Nothing -> "// Function " ++ show f ++ " failed to parse"
+  show (Func f ls t b) = prettyType f t ++ showParams ls ++ "{\n" ++ prettyBlock b ++ "}\n"
 
 instance {-# OVERLAPS #-} Show (String, Type) where
   show (n, t) = show t ++ " " ++ n
@@ -95,6 +93,7 @@ isImm (Ref _) = True
 isImm (AccessN _ _) = True
 isImm (AccessI _ _) = True
 isImm (BinOp _ _ _) = True
+isImm (App _ _) = True
 isImm _ = False
 
 
@@ -109,10 +108,11 @@ nothingIf False = Just
 prettyType :: String -> Type -> String
 prettyType n t = (show t) ++ " " ++ n
 
-prettyBlock :: Block -> Maybe String
-prettyBlock (e:[]) = Just $ applyIf (isImm e) ret (show e)
-prettyBlock (e:es) = liftM2 (++) (nothingIf (isImm e) (show e)) (prettyBlock es)
-prettyBlock [] = Just ""
+
+prettyBlock :: Block -> String
+prettyBlock (e:[]) = applyIf (isImm e) ret (show e)
+prettyBlock (e:es) = show e ++ prettyBlock es
+prettyBlock [] =  ""
 
 --prettyBlock (e:es) = return (show e) >>= \s -> prettyBlock es >>= \ss -> return (s ++ ss)
 
