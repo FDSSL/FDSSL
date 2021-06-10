@@ -315,8 +315,6 @@ parseExpr' =
       DT.traceM "Trying App..."
       i <- lowIdentifier
       es <- parens (many1 parseExpr)
-      DT.traceM $ "App name is " ++ i
-      DT.traceM $ "App list is " ++ (show es)
       return $ App i es
   )
   --try (App <$> lowIdentifier <*> parens (commaSep1 parseExpr) <*> return NOp)
@@ -328,17 +326,7 @@ parseExpr' =
   DT.trace "trying ref..." (try (Ref <$> (lowIdentifier <* notFollowedBy (reserved "[" <|> reserved "("))))
   <|>
   parens (parseExpr <* notFollowedBy comma) -- expr wrapped in parens, which is ok, but not part of list of sorts...
-  <|>
-  DT.trace "checking NOp..." (lookAhead (try $ reservedOp "}") *> return NOp) -- Nop is used to cap off when there's nothing else left here...
-  -- -- <|>
-  -- -- important that this goes LAST, otherwise binops will infinitely evaluate exprs forever...
-  -- do
-  --   DT.traceM "parsing BinOp"
-  --   e1 <- parseExpr
-  --   bo <- parseBOp
-  --   e2 <- parseExpr
-  --   return $ BinOp bo e1 e2
-  -- TODO Float goes here too
+  -- if followed by a comma
 
 -- | Parse a function
 parseFunc :: Parser ()
@@ -375,7 +363,6 @@ parseShader = try $ do
   whitespace
   reservedOp "="
   e <- parseBlock
-  DT.traceM $ "Expr parsed as " ++ show e
   let shader = Shader t (map toVarying e1) (map toVarying e2) e
   -- add this shader to the env
   addShader (n,shader)
@@ -439,7 +426,6 @@ parseProgram = try $ do
 parseFDSSL :: Parser ([(String,Prog)])
 parseFDSSL =
   many (choice [parseProgram,parseUniform,parseFunc,parseShader,parseCompShader]) >> getState >>= return . progs
-  -- parseProgram,parseUniform,parseFunc,parseShader,whitespace
 
 parseFDSSLFile :: String -> IO (Either ParseError ([(String,Prog)]))
 parseFDSSLFile f = do
