@@ -80,22 +80,6 @@ instance Show Func where
 instance {-# OVERLAPS #-} Show (String, Type) where
   show (n, t) = show t ++ " " ++ n
 
-isImm :: Expr -> Bool
-isImm (I _) = True
-isImm (B _) = True
-isImm (F _) = True
-isImm (D _) = True
-isImm (V2 _) = True
-isImm (V3 _) = True
-isImm (V4 _) = True
-isImm (Mat4 _) = True
-isImm (Ref _) = True
-isImm (AccessN _ _) = True
-isImm (AccessI _ _) = True
-isImm (BinOp _ _ _) = True
-isImm (App _ _) = True
-isImm _ = False
-
 
 applyIf :: Bool -> (a -> a) -> a -> a
 applyIf True  = ($)

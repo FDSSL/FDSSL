@@ -49,7 +49,7 @@ data Type =
   TV4 |
   TMat4 |
   TArray
-
+  deriving (Eq, Ord)
 
 data Expr =
   Mut Type String Expr            | -- mutable binding
@@ -75,6 +75,22 @@ data Expr =
   BinOp BOp Expr Expr             | -- infix app
   AccessN String String           | -- structure access by name
   AccessI String Int                -- structure access by index
+
+isImm :: Expr -> Bool
+isImm (I _) = True
+isImm (B _) = True
+isImm (F _) = True
+isImm (D _) = True
+isImm (V2 _) = True
+isImm (V3 _) = True
+isImm (V4 _) = True
+isImm (Mat4 _) = True
+isImm (Ref _) = True
+isImm (AccessN _ _) = True
+isImm (AccessI _ _) = True
+isImm (BinOp _ _ _) = True
+isImm (App _ _) = True
+isImm _ = False
 
 -- env is a list of functions
 type Env = [Opaque]
@@ -132,7 +148,12 @@ data Opaque = Opaque {
 -- top-level exprs, similar to statements
 
 -- func has a name, a list of name-type pairs, it's result type, and an expr
-data Func = Func String [(String,Type)] Type Block
+data Func = Func {
+  funcName :: String,
+  funcParams :: [(String,Type)],
+  funcRetType :: Type,
+  funcBody :: Block
+  }
 
 apply :: (Block -> Block) -> Func -> Func
 apply f (Func n p t b) = Func n p t (f b)
@@ -178,3 +199,4 @@ varying = Opaque Varying
 
 uniform :: Type -> String -> Opaque
 uniform = Opaque Uniform
+
