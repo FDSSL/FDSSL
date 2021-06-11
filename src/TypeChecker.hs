@@ -193,8 +193,8 @@ typeCheckFuncs :: MonadCheck m => m ()
 typeCheckFuncs = do
                    (Comb e fs l) <- get
 
-                   fs <- mapM checkFunc fs
-                   put $ Comb e fs l
+                   f <- mapM checkFunc fs
+                   put $ Comb e f l
                    -- Then we can check behavior
                    return ()
 
@@ -219,6 +219,14 @@ typeCheckShader (Shader t ie oe b) = do
               False -> throwError $ "Your " ++ show t ++ " shader set an output variable of incorrect type."
 
 
+checkVariable :: MonadCheck m => String -> m (Type, Maybe ShaderType)
+checkVariable name = do
+  (Comb e _ ls) <- get
+  case (lookup name ls, lookupE name e, lookup name shaderVals) of
+          (Just (t,m), _, _) -> return (t, Nothing)
+          (_,Just (Opaque _ t _), _) -> return (t, Nothing)
+          (_,_,Just (s,t)) -> return (t, Just s)
+          _ -> throwError $ "Variable " ++ name ++ " is not defined"
 
 -- Things to check
 --   Redefining variables
@@ -314,45 +322,35 @@ checkExpr (BComment _) = return (TNull, Nothing)
 checkExpr (App n p) = do
                         (Comb e f l) <- get
                         ps <- mapM checkExpr p
-                        (stype, (Func _ p t _)) <- lookupFM n f
-                        when (any (uncurry (/=)) (zip (map snd p) (map fst ps))) (throwError $ "Function " ++ n ++ " called with incorrect parameters")
+                        (stype, (Func _ params t _)) <- lookupFM n f
+                        when (any (uncurry (/=)) (zip (map snd params) (map fst ps))) (throwError $ "Function " ++ n ++ " called with incorrect parameters")
                         return (t, stype)
 
-checkExpr (BinOp _ e e') = do
+checkExpr (BinOp o e e') = do
                              (etype, stype) <- checkExpr e
                              (etype', stype') <- checkExpr e'
-                             when (etype /= etype') (throwError $ "Expression types to not match in binary operation")
-                             when (stype /= stype') (throwError $ "Shader types to not match in binary operation")
-                             -- TODO the result type of a BinOp is dependent on the operator & and its operands
-                             -- currently this just uses the first operand...and needs to be fixed
-                             return (etype, stype)
-
-checkExpr (AccessN name member) = do
-                                    (Comb e _ ls) <- get
-                                    -- TODO duplicate of the case below
-                                    case (lookup name ls, lookupE name e, lookup name shaderVals) of
-                                         (Just (t,m), _, _) -> return (t, Nothing)
-                                         (_,Just (Opaque _ t _), _) -> return (t, Nothing)
-                                         (_,_,Just (s,t)) -> return (t, Just s)
-                                         _ -> throwError $ "Collection " ++ name ++ " is not defined"
-
-checkExpr (AccessI name idx) = do
-                                 (Comb e _ ls) <- get
-                                 -- TODO duplicate of the case above
-                                 case (lookup name ls, lookupE name e, lookup name shaderVals) of
-                                         (Just (t,m), _, _) -> return (t, Nothing)
-                                         (_,Just (Opaque _ t _), _) -> return (t, Nothing)
-                                         (_,_,Just (s,t)) -> return (t, Just s)
-                                         _ -> throwError $ "Collection " ++ name ++ " is not defined"
-
-
+                             when (etype /= etype') (throwError "Expression types to not match in binary operation")
+                             when (stype /= stype') (throwError "Shader types to not match in binary operation")
+                             let (ptype, rtype) = bopType o
+                             when (not $ checkReq ptype etype) (throwError "Binary operator has incorrect parameters ")
+                             case toType rtype of
+                               Just t  -> return (t, stype)
+                               Nothing -> return (etype, stype)
+        where
+          checkReq (Needs t) t' = t == t'
+          checkReq None _ = True
+          checkReq (Nott t) t' = t /= t'
+          toType (Needs t) = Just t
+          toType _ = Nothing
+checkExpr (AccessN name _) = checkVariable name -- We don't check if the accesor is a member
+checkExpr (AccessI name _) = checkVariable name -- We don't check the size if we can
 checkExpr (I _) = return (TI,Nothing)
 checkExpr (B _) = return (TB,Nothing)
 checkExpr (F _) = return (TF,Nothing)
 checkExpr (D _) = return (TF,Nothing)
 checkExpr (V2 (e,e')) =  do
                               (_, stype) <- checkSame [e, e']
-                              return (TV2, stype)
+                              return (TV2, stype) -- We lose type annotation on inner expressions
 checkExpr (V3 (e,e',e'')) =  do
                               (_, stype) <- checkSame [e, e', e'']
                               return (TV3, stype)
@@ -362,14 +360,8 @@ checkExpr (V4 (e,e',e'',e''')) = do
 
 checkExpr (Mat4 _) = return (TMat4, Nothing)
 checkExpr (Array e) = checkSame e
-checkExpr (Ref name) = do
-  (Comb e _ ls) <- get
-  -- TODO duplicate of AccessI/N cases above, can be factored out
-  case (lookup name ls, lookupE name e, lookup name shaderVals) of
-          (Just (t,m), _, _) -> return (t, Nothing)
-          (_,Just (Opaque _ t _), _) -> return (t, Nothing)
-          (_,_,Just (s,t)) -> return (t, Just s)
-          _ -> throwError $ "Variable " ++ name ++ " is not defined"
+checkExpr (Ref name) = checkVariable name
+checkExpr NOp = return (TNull, Nothing)
 
 -- | Verify lists of exprs provided to vectors or arrays are homogoenously typed
 checkSame :: MonadCheck m => [Expr] -> m (Type, Maybe ShaderType)

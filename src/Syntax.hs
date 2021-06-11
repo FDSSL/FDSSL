@@ -104,6 +104,32 @@ isImm (BinOp _ _ _) = True
 isImm (App _ _) = True
 isImm _ = False
 
+
+data Req = Needs Type
+         | None
+         | Nott Type
+
+-- Takes a Binary operator
+-- Retuurns parameter type and return type
+bopType :: BOp -> (Req, Req)
+bopType Add     = (Nott TB, None)
+bopType Sub     = (Nott TB, None)
+bopType Mul     = (Nott TB, None)
+bopType Div     = (Nott TB, None)
+bopType Mod     = (Needs TI, Needs TI)
+bopType And     = (Needs TB, Needs TB)
+bopType Or      = (Needs TB, Needs TB)
+bopType Compose = (Needs TNull, Needs TNull)
+bopType Eq      = (None, Needs TB)
+bopType Neq     = (None, Needs TB)
+bopType Gte     = (Nott TB, Needs TB)
+bopType Gt      = (Nott TB, Needs TB)
+bopType Lte     = (Nott TB, Needs TB)
+bopType Lt      = (Nott TB, Needs TB)
+bopType BitAnd  = (Nott TB, None)
+bopType BitOr   = (Nott TB, None)
+bopType BitXor  = (Nott TB, None)
+
 -- env is a list of functions
 type Env = [Opaque]
 type Block = [Expr]
