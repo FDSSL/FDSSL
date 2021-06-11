@@ -19,6 +19,7 @@ main = do
   evalProg "examples/e2.fdssl"
   evalProg "examples/e3.fdssl"
   evalProg "examples/e4.fdssl"
+  evalProg "examples/e6.fdssl"
   evalProg "examples/shaderCompExampleProg.fdssl"
   putStrLn $ "\n* These example shaders will run on: https://www.uphouseworks.com/fdssl-test.html"
   putStrLn $ "* They will also run for any OpenGL program that defines the expected uniforms\n"

@@ -1,0 +1,16 @@
+uniform Float uOffset
+
+// vertex shader, updates the gl_Position for the rasterizer
+// & outputs a 2-tuple vXY
+vert v : (Vec3 aVertPos) -> (Vec2 vXY) = {
+  set gl_Position vec4 aVertPos[0] aVertPos[1] aVertPos[2] 1.0
+  out vXY (vec2 (aVertPos[0] + uOffset) (aVertPos[1] + uOffset))
+}
+
+// fragment shader
+// accepts a 2-tuple vXY to color R & G based on
+frag f : (Vec2 vXY) -> () = {
+  set gl_FragColor (vec4 vXY[0] vXY[1] 0.0 1.0)
+}
+
+e6 : Prog = mkProg v f

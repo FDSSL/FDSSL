@@ -32,8 +32,7 @@ data AllEnvs = Comb {
 -- | TypeChecked monad transformer stack
 type TypeChecked m = (
   MonadState AllEnvs m,
-  MonadError Error m
-                    )
+  MonadError Error m)
 
 -- | Builtin shader values provided by GLSL
 shaderVals :: [(String,(ShaderType,Type))]
