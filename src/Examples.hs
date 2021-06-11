@@ -1,27 +1,10 @@
 module Examples where
 
+--
+-- Example programs written in FDSSL abstract syntax
+--
+
 import Syntax
-
-{-
-Examples that should not type check later on
-
--- | Example program w/ ints (shouldn't type-check later)
-e1 :: Prog
-e1 = Prog [fInc] [] (VertShader [] (Mut TI "x" (I 5) (Return U))) (FragShader [] (Return $ I 9))
-
--- | Example program with bools (shouldn't type-check later)
-e2 :: Prog
-e2 = Prog [fInc] [] (VertShader [] (Return $ B False)) (FragShader [] (Return $ B True))
-
--- | Shouldn't type check later
-e3 :: Prog
-e3 = Prog [fInc] [] (VertShader [] (Return $ I 5)) (FragShader [] (Return $ B True))
-
--- | Program w/ branching, also shouldn't type check later
-e4 :: Prog
-e4 = Prog [fInc] [aAttr] (VertShader [vColor] (Mut TB "x" (B False) (Branch ((Ref "x")) (Return $ I 2) (Return U)))) (FragShader [] (Return $ B True))
-
--}
 
 -- | Example function, that add increments it's arg by 1
 fInc :: Func

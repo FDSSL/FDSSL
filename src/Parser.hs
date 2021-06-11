@@ -1,5 +1,9 @@
 module Parser where
 
+--
+-- FDSSL Parser
+--
+
 import Syntax
 import Pretty
 
@@ -21,48 +25,60 @@ data PState = PState {
   progs    :: [(String,Prog)]  -- programs parsed along the way
 }
 
+-- | Consumes input & returns the original parser
 consume :: (String, a)-> Parser a
 consume (s,a) = reserved s *> return a
 
+-- | Allows checkig over a list of literal sequences to parse & their corresponding results
 listTrans :: [(String, a)] -> Parser a
 listTrans = choice . map consume
 
+-- | Initial program state
 initialState :: PState
 initialState = PState [] [] [] []
 
+-- | Find a shader in the state
 lookupShader :: String -> Parser (Maybe Shader)
 lookupShader s = do
   (PState _ _ ss _) <- getState
   return $ lookup s ss
 
+-- | Add uniform variable to the state
 addUni :: Opaque -> Parser ()
 addUni u' = do
   (PState u f s p) <- getState
   putState $ PState (u':u) f s p
 
+-- | Retrieves uniform (global) variables from the state
 getUnis :: Parser (Env)
 getUnis = getState >>= return . uniforms
 
+-- | Retrieves functions in the state
 getFuncs :: Parser [Func]
 getFuncs = getState >>= return . funcs
 
+-- | Adds a function into the state
 addFunc :: Func -> Parser ()
 addFunc f' = do
   (PState u f s p) <- getState
   putState $ PState u (f':f) s p
 
+-- | Adds a shader into the state
 addShader :: (String,Shader) -> Parser ()
 addShader s' = do
   (PState u f s p) <- getState
   putState $ PState u f (s':s) p
 
+-- | Adds a program into the state
 addProg :: (String,Prog) -> Parser ()
 addProg p' = do
   (PState u f s p) <- getState
   putState $ PState u f s (p':p)
 
+-- | Parser helper
 type Parser = Parsec String (PState)
 
+-- | The FDSSL language definition
 defFDSSL :: P.GenLanguageDef String u Identity
 defFDSSL = (haskellStyle
   {
@@ -268,6 +284,8 @@ parseExpr' =
     return $ For e1 (Just e2) blk)
   <|>
   For <$> (reserved "for" *> parseExpr) <*> (consume ("do", Nothing)) <*> parseBlock
+  -- | TODO originally imagined to be incorporated into the syntax, but Parsec likes to eat comments before we can use them
+  -- marked for future work...
   -- <|>
   -- SComment <$> (string "//" *> manyTill anyChar newline) <*> parseExpr
   -- <|>
@@ -312,13 +330,13 @@ parseExpr' =
   <|>
   Array <$> (brackets (commaSep1 parseExpr))
   <|>
+  -- application
   try (
     do
       i <- lowIdentifier
       es <- parens (many1 parseExpr)
       return $ App i es
   )
-  --try (App <$> lowIdentifier <*> parens (commaSep1 parseExpr) <*> return NOp)
   <|>
   try (AccessI <$> lowIdentifier <*> (brackets int))
   <|>

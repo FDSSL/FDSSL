@@ -2,6 +2,12 @@
 
 module Syntax where
 
+--
+-- FDSSL Syntax
+--
+-- Uses an abstract syntax that is not parametric or higher-ordered
+--
+
 import Data.Matrix
 import Data.List
 import qualified Data.Set as S
@@ -84,6 +90,9 @@ instance Show Type where
   show TMat4 = "mat4"
   show _ = error "Some type not implemented yet in show instance for 'Type' in Syntax.hs"
 
+-- | FDSSL Expressions
+-- There is a mixing here between actual expressions and what would constitute statements
+-- We would like to demarc this in future versions
 data Expr =
   Mut Type String Expr            | -- mutable binding
   Const Type String Expr          | -- const binding
@@ -110,6 +119,7 @@ data Expr =
   AccessI String Int                -- structure access by index
   deriving Show
 
+-- | Whether an expr is an immediate value or not
 isImm :: Expr -> Bool
 isImm (I _) = True
 isImm (B _) = True
@@ -126,13 +136,14 @@ isImm (BinOp _ _ _) = True
 isImm (App _ _) = True
 isImm _ = False
 
-
+-- | Used to denote constraints on functions
 data Req = Needs Type
          | None
          | Nott Type
 
+-- | Denotes constraints on binary operations
 -- Takes a Binary operator
--- Retuurns parameter type and return type
+-- Returns parameter type and return type
 bopType :: BOp -> (Req, Req)
 bopType Add     = (Nott TB, None)
 bopType Sub     = (Nott TB, None)
@@ -156,8 +167,10 @@ bopType BitXor  = (Nott TB, None)
 type Env = [Opaque]
 type Block = [Expr]
 
+-- | List of Functions that may be built-in to specific shader stage
 type Funcs = [(Maybe ShaderType, Func)]
 
+-- | Shader types, Vertex or Fragment (not including Tesselation, Geometry, or Compute shaders here)
 data ShaderType = VertShader | FragShader
   deriving (Show, Eq, Ord)
 
@@ -170,6 +183,7 @@ data Shader = Shader {
 }
   deriving Show
 
+-- | General Guard
 guard :: Bool -> Maybe ()
 guard True  = Just ()
 guard False = Nothing
@@ -178,6 +192,14 @@ guard False = Nothing
 duplicates :: Ord a => [a] -> [a] -> [a]
 duplicates l r = S.toList $ S.intersection (S.fromList l) (S.fromList r)
 
+-- | Typeclass for defining our form of composition
+-- Composition in this fashion is not a -> b and b -> c producing a -> c,
+-- but is a gluing of the inputs & outputs to combine their effects
+-- so our form is as follows
+-- a -> b & c -> d
+-- (a,c) -> (c,d)
+-- it's a literal stacking of function definitions
+-- We do this to resemble the singular structure of a shader w/ several ins & outs
 class Composable a where
  comp :: a -> a -> Maybe a
 
@@ -244,7 +266,7 @@ instance Eq Opaque where
 instance Ord Opaque where
   compare Opaque{opaqueName = on} Opaque{opaqueName = on'} = compare on on'
 
--- during evaluation, a value can be wrapped into a known expr if it derives wrappable
+-- | During evaluation (for programs written in the AST directly), a value can be wrapped into a known expr if it derives wrappable
 -- so we can do w/e we want for these, functions, and wrap the results without having to do it explicitly ourselves every time, it's either supported or it's not
 -- this is a vestige of sorts, and was more relevant when we wrote programs in their AST form directly within Haskell
 class Wrappable a where

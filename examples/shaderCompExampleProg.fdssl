@@ -15,6 +15,7 @@ vert v1 : (Vec3 aVertPos) -> (Vec4 pos) = {
 // This shader uses 'pos' although it is not defined here
 // On its own this is invalid, but is acceptable when composed with v1 to have access to 'pos'
 // Composition is just a gluing together of shaders
+// in future work, we would like to make this evident in the signatures themselves, or to revise how composition is performed
 vert v2 : (Vec3 aVertPos) -> (Vec3 vXYZ) = {
   set gl_Position (uProjectionMatrix * uModelViewMatrix * pos)
   out vXYZ (vec3 pos[x] pos[y] pos[z])

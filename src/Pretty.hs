@@ -1,5 +1,14 @@
 {-# LANGUAGE FlexibleInstances #-}
 
+--
+-- FDSSL Pretty Printer
+-- 
+-- Due to the tight coupling between FDSSL & GLSL,
+-- the parser acts as a transpiler from FDSSL -> GLSL directly.
+-- In future work, we would like to include a GLSL abstract syntax
+-- to compile to & pretty print instead
+--
+
 module Pretty where
 
 import Control.Monad.State

@@ -1,8 +1,8 @@
-{-# LANGUAGE
-     ConstraintKinds,
-     FlexibleContexts
-  #-}
+{-# LANGUAGE ConstraintKinds,FlexibleContexts #-}
 
+--
+-- FDSSL Typechecker
+--
 
 module TypeChecker where
 
@@ -13,15 +13,6 @@ import Control.Monad.State    (State,MonadState,get,put,modify,runStateT)
 import Control.Monad          (guard, when, sequence, mapM)
 import qualified Data.Set as S
 import Data.Maybe
-
-import Debug.Trace as DT
-
--- tyep check to make sure applications are good
--- type check to make sure various bin ops and such are good
-
--- TODO, finish the type checker
---typecheck :: Prog -> TypeChecked Prog
---typecheck (Prog eGlobal eAttr vs fs) = tcGlobals eGlobal
 
 -- | Represents an error message from the type checker
 type Error = String
@@ -62,16 +53,11 @@ type ParamType = Type
 type RetType = Type
 
 -- | Builtin general-purpose shader functions
+-- note the empty body, we're just interested in the signatures since their definitions are assumed
 shaderFuncs :: Funcs
 shaderFuncs = [
   (Nothing, Func "sin" [("x",TF)] TF []),
   (Nothing, Func "cos" [("x",TF)] TF [])]
-
-{-
-funcName :: String,
-funcParams :: [(String,Type)],
-funcRetType :: Type,
--}
 
 -- | General lookup function
 lookupG :: Eq b => (a -> b) -> b -> [a] -> Maybe a
@@ -153,20 +139,7 @@ repeated = go []
 
 -- | Prepares an initial typechecked env
 initEnv :: TypeChecked m => Env -> Funcs -> m ()
-initEnv e f = do
-                 -- let funcs = map (funcName . snd) f
-                 -- let uniforms = map opaqueName e
-                 -- let shared = unique funcs uniforms
-
-                 -- when (shared /= []) (throwError ("Name overlap between defined functions and uniform variables: " ++ show shared))
-
-                 -- let funcs = repeated funcs
-                 -- let uniforms = repeated uniforms
-
-                 -- when (funcs /= []) (throwError ("Multiple function definitions: " ++  show funcs))
-                 -- when (uniforms /= []) (throwError ("Multiple uniform definition: " ++ show uniforms))
-
-                 put $ Comb e (f ++ shaderFuncs) []
+initEnv e f = put $ Comb e (f ++ shaderFuncs) []
 
 -- | Type check an FDSSL Program
 typeCheckProg :: TypeChecked m => Prog -> m Prog
@@ -205,7 +178,7 @@ checkFunc (_, f@(Func n p t b)) = do
                                 return (stype, f)
 
 -- | Type check several FDSSL Functions
--- TODO, redundant, we should just do this via mapM on the 'checkFunc' func above
+-- TODO, redundant, down the road we can just do this via mapM and using the 'checkFunc' func above
 typeCheckFuncs :: TypeChecked m => m ()
 typeCheckFuncs = do
                    (Comb e fs l) <- get
@@ -244,13 +217,6 @@ checkVariable name = do
           (_,Just (Opaque _ t _), _) -> return (t, Nothing)
           (_,_,Just (s,t)) -> return (t, Just s)
           _ -> throwError $ "Variable " ++ name ++ " is not defined"
-
--- Things to check
---   Redefining variables
---   Check that parameters match function calls
---   Check that binops match
---   Check that AccessI matches length of array
---   Type check assignments
 
 -- | Type check new bindings, so they do not shadow an existing immutable one
 -- and that for mutable bindings the types still match
