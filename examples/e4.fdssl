@@ -5,10 +5,8 @@ uniform Mat4 uModelViewMatrix
 uniform Float	uTime
 
 // better shader, w/ an output, varyings
-vert v1 : (Vec3 aVertPos) -> (Vec3 vXYZ) = {
-  mut Vec4 pos = vec4 (aVertPos[x] * cos(uTime)) aVertPos[y] aVertPos[z] 1.0
+vert v1 : (Vec3 aVertPos) -> () = {
   set gl_Position (uProjectionMatrix * uModelViewMatrix * pos)
-
   out vXYZ aVertPos
 }
 

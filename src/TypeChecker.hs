@@ -39,7 +39,7 @@ data AllEnvs = Comb {
 }
 
 -- | TypeChecked monad transformer stack
-type MonadCheck m = (
+type TypeChecked m = (
   MonadState AllEnvs m,
   MonadError Error m
                     )
@@ -85,7 +85,7 @@ lookupF :: String -> Funcs -> Maybe (Maybe ShaderType, Func)
 lookupF = lookupG (funcName . snd)
 
 -- | Lookup a function in the TypeChecked monad
-lookupFM :: MonadCheck m => String -> Funcs -> m (Maybe ShaderType, Func)
+lookupFM :: TypeChecked m => String -> Funcs -> m (Maybe ShaderType, Func)
 lookupFM n fs = case lookupF n fs of
                   Just f  -> return f
                   Nothing -> throwError $ "Function " ++ n ++ " is not defined"
@@ -95,13 +95,13 @@ lookupE :: String -> Env -> Maybe Opaque
 lookupE = lookupG opaqueName
 
 -- | Lookup an opaque type (uniform) in the TypeChecked monad
-lookupEM :: MonadCheck m => String -> Env -> m Opaque
+lookupEM :: TypeChecked m => String -> Env -> m Opaque
 lookupEM n es = case lookupE n es of
                   Just e  -> return e
                   Nothing -> throwError $ "Function " ++ n ++ " is not defined"
 
 -- | Lookup a local binding in the TypeChecked monad
-lookupLM :: MonadCheck m => String -> Locals -> m (Type, Bool)
+lookupLM :: TypeChecked m => String -> Locals -> m (Type, Bool)
 lookupLM n ls = case lookup n ls of
                   Just l -> return l
                   Nothing -> (throwError $ "Local variable " ++ n ++ " is not defined")
@@ -152,7 +152,7 @@ repeated = go []
     go ys []  = ys
 
 -- | Prepares an initial typechecked env
-initEnv :: MonadCheck m => Env -> Funcs -> m ()
+initEnv :: TypeChecked m => Env -> Funcs -> m ()
 initEnv e f = do
                  -- let funcs = map (funcName . snd) f
                  -- let uniforms = map opaqueName e
@@ -169,7 +169,7 @@ initEnv e f = do
                  put $ Comb e (f ++ shaderFuncs) []
 
 -- | Type check an FDSSL Program
-typeCheckProg :: MonadCheck m => Prog -> m Prog
+typeCheckProg :: TypeChecked m => Prog -> m Prog
 typeCheckProg p@(Prog e f s s')
                    | shaderType s  /= VertShader = throwError "First shader must be a vertex shader"
                    | shaderType s' /= FragShader = throwError "Second shader must be a fragment shader"
@@ -189,19 +189,15 @@ typeCheckProg p@(Prog e f s s')
                                                      return p
 
 -- | Type check a block, aka a list of exprs
-checkBlock :: MonadCheck m => Block -> Type -> m (Type, Maybe ShaderType)
+checkBlock :: TypeChecked m => Block -> Type -> m (Type, Maybe ShaderType)
 checkBlock [] _     = return (TNull, Nothing)
 checkBlock (e:es) t = do
                        (etype, stype) <- checkExpr e
-                       r <- checkBlock es t
-                       return r
-checkBlock (e:[]) t = do
-                       (etype, stype) <- checkExpr e
                        when (isImm e && t /= etype) (throwError $ "Final expression of block does not match function return type")
-                       return (TNull, Nothing)
+                       checkBlock es t
 
 -- | Type check an FDSSL Function
-checkFunc :: MonadCheck m => (Maybe ShaderType, Func) -> m (Maybe ShaderType, Func)
+checkFunc :: TypeChecked m => (Maybe ShaderType, Func) -> m (Maybe ShaderType, Func)
 checkFunc (_, f@(Func n p t b)) = do
                                 modify (addFuncParams p)
                                 (typ, stype) <- checkBlock b t
@@ -210,7 +206,7 @@ checkFunc (_, f@(Func n p t b)) = do
 
 -- | Type check several FDSSL Functions
 -- TODO, redundant, we should just do this via mapM on the 'checkFunc' func above
-typeCheckFuncs :: MonadCheck m => m ()
+typeCheckFuncs :: TypeChecked m => m ()
 typeCheckFuncs = do
                    (Comb e fs l) <- get
 
@@ -220,7 +216,7 @@ typeCheckFuncs = do
                    return ()
 
 -- | Type check an FDSSL Shader
-typeCheckShader :: MonadCheck m => Shader -> m ()
+typeCheckShader :: TypeChecked m => Shader -> m ()
 typeCheckShader (Shader t ie oe b) = do
   -- collect shader inputs as immutable local bindings
   let shaderInputs = map (\(Opaque o t n) -> (n,(t,False))) ie
@@ -240,7 +236,7 @@ typeCheckShader (Shader t ie oe b) = do
               False -> throwError $ "Your " ++ show t ++ " shader set an output variable of incorrect type."
 
 -- | Type checks a given variable/ref
-checkVariable :: MonadCheck m => String -> m (Type, Maybe ShaderType)
+checkVariable :: TypeChecked m => String -> m (Type, Maybe ShaderType)
 checkVariable name = do
   (Comb e _ ls) <- get
   case (lookup name ls, lookupE name e, lookup name shaderVals) of
@@ -258,7 +254,7 @@ checkVariable name = do
 
 -- | Type check new bindings, so they do not shadow an existing immutable one
 -- and that for mutable bindings the types still match
-checkAssign :: MonadCheck m => Bool -> Type -> String -> Expr -> AllEnvs -> m (Type, Maybe ShaderType)
+checkAssign :: TypeChecked m => Bool -> Type -> String -> Expr -> AllEnvs -> m (Type, Maybe ShaderType)
 checkAssign mut typ name expr env = do
                                   when (isDefined name env) (throwError $ "Variable " ++ name ++ " already defined")
                                   (etype, stype) <- checkExpr expr
@@ -267,7 +263,7 @@ checkAssign mut typ name expr env = do
                                   return (etype, stype)
 
 -- | Type check an FDSSL expression
-checkExpr :: MonadCheck m => Expr -> m (Type, Maybe ShaderType)
+checkExpr :: TypeChecked m => Expr -> m (Type, Maybe ShaderType)
 checkExpr (Mut typ name expr)   = get >>= checkAssign True typ name expr
 checkExpr (Const typ name expr) = get >>= checkAssign False typ name expr
 -- update of an existing binding
@@ -357,9 +353,9 @@ checkExpr (BinOp o e e') = do
                              (etype, stype) <- checkExpr e
                              (etype', stype') <- checkExpr e'
                              -- type check binops, but allow a special case between mats & vects
-                             -- TODO, this is not quite correct, as it allows arbitrary binop usage between mats & vects
+                             -- TODO, this is not correct yet, as it allows arbitrary binop usage between mats & vects
                              -- in future work, we need to correctly rewrite binops as overloaded functions definitions, and type check them normally like any other function
-                             -- the type list is small enough that we can capture the acceptable set of operands w/ their operators
+                             -- the type list is small enough that we can capture the total acceptable set of operands w/ their operators
                              when (etype /= etype' && not (etype `elem` [TMat4,TV4]) && not (etype' `elem` [TMat4,TV4])) (throwError $ "Expression types do not match in binary operation: " ++ show etype ++ " and " ++ show etype')
                              when (stype /= stype') (throwError $ "Shader types do not match in binary operation: " ++ show stype ++ " and " ++ show stype')
                              let (ptype, rtype) = bopType o
@@ -374,13 +370,19 @@ checkExpr (BinOp o e e') = do
           toType (Needs t) = Just t
           toType _ = Nothing
 checkExpr (AccessN name n) = do
-  -- verify this expr exists
-  (t,_) <- checkVariable name -- We don't check if the accesor is a member
+  -- verify this name is bound
+  (t,_) <- checkVariable name
+  -- verify the type is suitable for access
   when (t /= TV2 && t /= TV3 && t /= TV4) (throwError $ "Cannot access a named index of non-vector " ++ name ++ " with index " ++ n)
+  -- verify the accessing index is one of the 4 suitable named indexes (corresponding to 0-3)
+  when (not (n `elem` ["x","y","z","w"])) (throwError $ "Invalid named index " ++ n ++ " used to access vector " ++ name ++ ". Use x,y,z or w.")
   return (TF,Nothing)
 checkExpr (AccessI name i) = do
-  (t,_) <- checkVariable name -- We don't check the size if we can
+  (t,_) <- checkVariable name
+  -- verify the type is suitable for access
   when (t /= TV2 && t /= TV3 && t /= TV4) (throwError $ "Cannot access a named index of non-vector " ++ name ++ " with index " ++ (show i))
+  -- verify the sized index is appropriate
+  when (t == TV2 && i > 1 || t == TV3 && i > 2 || t == TV4 && i > 3) (throwError $ "Invalid index " ++ show i ++ " used to access " ++ show t ++ " " ++ name)
   return (TF,Nothing)
 checkExpr (I _) = return (TI,Nothing)
 checkExpr (B _) = return (TB,Nothing)
@@ -402,7 +404,7 @@ checkExpr (Ref name) = checkVariable name
 checkExpr NOp = return (TNull, Nothing)
 
 -- | Verify lists of exprs provided to vectors or arrays are homogoenously typed
-checkSame :: MonadCheck m => [Expr] -> m (Type, Maybe ShaderType)
+checkSame :: TypeChecked m => [Expr] -> m (Type, Maybe ShaderType)
 checkSame es = do
                    ps <- mapM checkExpr es
                    let ptypes = map fst ps
