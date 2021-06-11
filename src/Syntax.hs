@@ -108,7 +108,7 @@ data Shader = Shader {
   inEnv :: Env,
   outEnv :: Env,
   shaderBody :: [Expr]
-  }
+}
 
 guard :: Bool -> Maybe ()
 guard True  = Just ()
