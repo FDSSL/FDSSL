@@ -52,6 +52,17 @@ data Type =
   TNull
   deriving (Eq, Ord)
 
+-- | Simple show instances for types
+instance Show Type where
+  show TI = "int"
+  show TB = "bool"
+  show TF = "float"
+  show TV2 = "vec2"
+  show TV3 = "vec3"
+  show TV4 = "vec4"
+  show TMat4 = "mat4"
+  show _ = error "Some type not implemented yet in show instance for 'Type' in Syntax.hs"
+
 data Expr =
   Mut Type String Expr            | -- mutable binding
   Const Type String Expr          | -- const binding

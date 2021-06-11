@@ -16,7 +16,6 @@ import Data.Maybe
 
 -- tyep check to make sure applications are good
 -- type check to make sure various bin ops and such are good
--- type check calls to functions, if they're undefined fail
 
 -- TODO, finish the type checker
 --typecheck :: Prog -> TypeChecked Prog
@@ -52,10 +51,7 @@ shaderVals = [
   ("gl_InstanceIndex", (VertShader,TI)),
   ("gl_DrawID", (VertShader,TI)),
   ("gl_BaseVertex",(VertShader,TI)),
-  ("gl_BaseInstance", (VertShader,TI)),
-
-  ("gl_Position", (VertShader,TV4)),
-  ("gl_FragColor", (VertShader,TV4))
+  ("gl_BaseInstance", (VertShader,TI))
  ]
 
 -- | General lookup function
@@ -162,8 +158,14 @@ typeCheckProg p@(Prog e f s s')
                    | otherwise                   = do
                                                      initEnv e f
                                                      typeCheckFuncs
+                                                     -- add gl_Position to locals
+                                                     modify $ addLocal ("gl_Position",(TV4,True))
+                                                     -- type check the vertex shader
                                                      typeCheckShader s
                                                      modify clearLocals
+                                                     -- add gl_FragColor to locals
+                                                     modify $ addLocal ("gl_FragColor",(TV4,True))
+                                                     -- type check the fragment shader
                                                      typeCheckShader s'
                                                      return p
 
@@ -174,7 +176,7 @@ checkBlock (e:es) t = do
                        return (TNull, Nothing)
 checkBlock (e:[]) t = do
                        (etype, stype) <- checkExpr e
-                       when (isImm e && t /= etype) (throwError $ "Final expression of block  does not match function return type")
+                       when (isImm e && t /= etype) (throwError $ "Final expression of block does not match function return type")
                        return (TNull, Nothing)
 
 -- | Type check an FDSSL Function
@@ -281,7 +283,7 @@ checkExpr (Out name expr)      = do
 
 checkExpr (Branch c e e') = do
                               (etype, stype) <- checkExpr c
-                              when (etype /= TB) (throwError "Branch conditions must be of type Bool")
+                              when (etype /= TB) (throwError $ "Branch conditions must be of type Bool, got type " ++ show etype)
                               es <- mapM checkExpr e
                               es' <- mapM checkExpr e'
                               let (etype, stype) = last es
@@ -290,7 +292,16 @@ checkExpr (Branch c e e') = do
                               when (stype /= stype') (throwError "Branche shader environments must be of the same type")
                               return (etype, stype)
 
-checkExpr (For c (Just n) b) = undefined
+checkExpr (For c (Just n) b) = do
+                                (etype, stype) <- checkExpr c
+                                when (etype /= TI) (throwError "For loop count must be an integer")
+                                -- verify the introduced loop index is fresh
+                                ae <- get
+                                when (isDefined n ae == True) (throwError $ "For loop index name, " ++ n ++ " already exists.")
+                                es <- mapM checkExpr b
+                                let (etype', stype') = last es
+                                when (stype /= stype') (throwError "Shader environments must be the same between for loop condition and its body")
+                                return (etype', stype')
 checkExpr (For c Nothing b) = do
                                 (etype, stype) <- checkExpr c
                                 when (etype /= TI) (throwError "For loop count must be an integer")
@@ -310,12 +321,15 @@ checkExpr (App n p) = do
 checkExpr (BinOp _ e e') = do
                              (etype, stype) <- checkExpr e
                              (etype', stype') <- checkExpr e'
-                             when (etype /= etype') (throwError $ "Expression types to not match in binrary operation")
-                             when (stype /= stype') (throwError $ "Shader types to not match in binrary operation")
+                             when (etype /= etype') (throwError $ "Expression types to not match in binary operation")
+                             when (stype /= stype') (throwError $ "Shader types to not match in binary operation")
+                             -- TODO the result type of a BinOp is dependent on the operator & and its operands
+                             -- currently this just uses the first operand...and needs to be fixed
                              return (etype, stype)
 
 checkExpr (AccessN name member) = do
                                     (Comb e _ ls) <- get
+                                    -- TODO duplicate of the case below
                                     case (lookup name ls, lookupE name e, lookup name shaderVals) of
                                          (Just (t,m), _, _) -> return (t, Nothing)
                                          (_,Just (Opaque _ t _), _) -> return (t, Nothing)
@@ -324,6 +338,7 @@ checkExpr (AccessN name member) = do
 
 checkExpr (AccessI name idx) = do
                                  (Comb e _ ls) <- get
+                                 -- TODO duplicate of the case above
                                  case (lookup name ls, lookupE name e, lookup name shaderVals) of
                                          (Just (t,m), _, _) -> return (t, Nothing)
                                          (_,Just (Opaque _ t _), _) -> return (t, Nothing)
@@ -347,6 +362,14 @@ checkExpr (V4 (e,e',e'',e''')) = do
 
 checkExpr (Mat4 _) = return (TMat4, Nothing)
 checkExpr (Array e) = checkSame e
+checkExpr (Ref name) = do
+  (Comb e _ ls) <- get
+  -- TODO duplicate of AccessI/N cases above, can be factored out
+  case (lookup name ls, lookupE name e, lookup name shaderVals) of
+          (Just (t,m), _, _) -> return (t, Nothing)
+          (_,Just (Opaque _ t _), _) -> return (t, Nothing)
+          (_,_,Just (s,t)) -> return (t, Just s)
+          _ -> throwError $ "Variable " ++ name ++ " is not defined"
 
 -- | Verify lists of exprs provided to vectors or arrays are homogoenously typed
 checkSame :: MonadCheck m => [Expr] -> m (Type, Maybe ShaderType)
