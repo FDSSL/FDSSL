@@ -12,4 +12,4 @@ frag f : () -> () = {
   set gl_FragColor vec4 0 1 0 1
 }
 
-prog1 : Prog = mkProg v f
+e0 : Prog = mkProg v f

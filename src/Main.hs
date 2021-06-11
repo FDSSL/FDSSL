@@ -6,7 +6,12 @@ import Examples
 import Parser
 
 main :: IO ()
-main = evalProg "examples/e1.txt" --putStrLn $ prettySafe prog1
+main = do
+  evalProg "examples/e0.fdssl"
+  evalProg "examples/e1.fdssl"
+  evalProg "examples/e2.fdssl"
+  evalProg "examples/e3.fdssl"
+  evalProg "examples/e4.fdssl"
 
 -- | Evaluates an FDSSL program, and prints the results as GLSL
 -- evalProg :: String -> IO ()
@@ -36,6 +41,7 @@ evalProg fn = do
       mapM (\(s,(v,f)) -> do
         writeFile (s ++ ".vert") v
         writeFile (s ++ ".frag") f
-        putStrLn $ "* Vertex shader written to " ++ s ++ ".vert"
+        putStrLn $ "\n* Vertex shader written to " ++ s ++ ".vert"
         putStrLn $ "* Fragment shader written to " ++ s ++ ".frag") ls
+      putStrLn $ "* Produced " ++ (show $ length ls) ++ " GLSL program(s)\n"
       return ()

@@ -8,8 +8,8 @@ import Text.Parsec.Char
 import Text.Parsec.Language
 import Text.Parsec.Expr
 import qualified Text.Parsec.Token as P
-import Debug.Trace as DT
 import GHC.Float
+import Data.List
 
 import Data.Functor.Identity(Identity)
 
@@ -186,13 +186,10 @@ parseParams = parens $ commaSep $ parseParam
 parseUniform :: Parser ()
 parseUniform =
   do
-    DT.traceM "parsing uniform..."
     whitespace
     reserved "uniform"
     typ <- parseType
-    DT.traceM $ "uni type " ++ (show typ)
     name <- lowIdentifier
-    DT.traceM $ "uni name " ++ name
     let u = Opaque Uniform typ name
     -- add uniform to state
     addUni u
@@ -218,11 +215,9 @@ parseShaderSignature =
   do
     t1 <- parseParams
     whitespace
-    DT.traceM $ "T1 obtained as" ++ show t1
     reservedOp "->"
     whitespace
     t2 <- parseParams
-    DT.traceM $ "T2 obtained as" ++ show t2
     return (t1,t2)
 
 
@@ -251,7 +246,6 @@ parseBlock = braces $ many1 parseExpr
 -- | Parse an expr
 parseExpr' :: Parser (Expr)
 parseExpr' =
-  DT.trace "parsing expression..." $
   Mut <$> (reserved "mut" *> parseType) <*> lowIdentifier <*> (reserved "=" *> parseExpr)
   <|>
   Const <$> (reserved "const" *> parseType) <*> lowIdentifier <*> (reserved "=" *> parseExpr)
@@ -261,6 +255,15 @@ parseExpr' =
   Out <$> (reserved "out" *> lowIdentifier) <*> parseExpr
   <|>
   Branch <$> (reserved "if" *> parseExpr) <*> (reserved "then" *> parseBlock) <*> (reserved "else" *> parseBlock)
+  <|>
+  -- For with named var
+  try(do
+    reserved "for"
+    e1 <- parseExpr
+    reserved "do"
+    e2 <- lowIdentifier
+    blk <- parseBlock
+    return $ For e1 (Just e2) blk)
   <|>
   For <$> (reserved "for" *> parseExpr) <*> (consume ("do", Nothing)) <*> parseBlock
   -- <|>
@@ -278,7 +281,6 @@ parseExpr' =
   B <$> listTrans [("true", True), ("false", False)]
   <|>
   do
-    DT.traceM "parsing vec4..."
     reserved "vec4"
     e1 <- parseExpr
     whitespace
@@ -290,7 +292,6 @@ parseExpr' =
     return $ V4 (e1,e2,e3,e4)
   <|>
   do
-    DT.traceM "parsing vec3..."
     reserved "vec3"
     e1 <- parseExpr
     whitespace
@@ -300,30 +301,28 @@ parseExpr' =
     return $ V3 (e1,e2,e3)
   <|>
   do
-    DT.traceM "parsing vec2..."
     reserved "vec2"
     e1 <- parseExpr
-    spaces
+    whitespace
     e2 <- parseExpr
     return $ V2 (e1,e2)
   -- -- TODO add Mat4, but realizing some names may need to be looked up to get their types...
   <|>
-  DT.trace "trying array..." (Array <$> (brackets (commaSep1 parseExpr)))
+  Array <$> (brackets (commaSep1 parseExpr))
   <|>
   try (
     do
-      DT.traceM "Trying App..."
       i <- lowIdentifier
       es <- parens (many1 parseExpr)
       return $ App i es
   )
   --try (App <$> lowIdentifier <*> parens (commaSep1 parseExpr) <*> return NOp)
   <|>
-  DT.trace "trying accessI..." try (AccessI <$> lowIdentifier <*> (brackets int))
+  try (AccessI <$> lowIdentifier <*> (brackets int))
   <|>
-  DT.trace "trying accessN..." try (AccessN <$> lowIdentifier <*> (brackets lowIdentifier))
+  try (AccessN <$> lowIdentifier <*> (brackets lowIdentifier))
   <|>
-  DT.trace "trying ref..." (try (Ref <$> (lowIdentifier <* notFollowedBy (reserved "[" <|> reserved "("))))
+  (try (Ref <$> (lowIdentifier <* notFollowedBy (reserved "[" <|> reserved "("))))
   <|>
   parens (parseExpr <* notFollowedBy comma) -- expr wrapped in parens, which is ok, but not part of list of sorts...
   -- if followed by a comma
@@ -332,13 +331,10 @@ parseExpr' =
 parseFunc :: Parser ()
 parseFunc =
   do
-    DT.traceM "parsing function"
     whitespace
     name <- lowIdentifier
-    DT.traceM $ "identifier is " ++ name
     reservedOp ":"
     (params,typ) <- parseFuncSignature
-    DT.traceM $ "Func signature parts are " ++ show params ++ " and " ++ show typ
     reservedOp "="
     expr <- braces $ many1 parseExpr
     let f = Func name params typ expr
@@ -350,20 +346,22 @@ parseFunc =
 toVarying :: (String,Type) -> Opaque
 toVarying (s,t) = Opaque Varying t s
 
+-- | Convert a pair of name & type (a param) into an attribute passed into the vert shader
+toAttribute :: (String,Type) -> Opaque
+toAttribute (s,t) = Opaque Attribute t s
+
 parseShader :: Parser ()
 parseShader = try $ do
-  DT.traceM "parsing shader..."
   t <- listTrans [("vert", VertShader), ("frag", FragShader)]
-  DT.traceM $ "Shader type is " ++ (show t)
   n <- lowIdentifier
-  DT.traceM $ "Shader name <<>> is " ++ n
   reservedOp ":"
   (e1,e2) <- parseShaderSignature
-  DT.traceM $ "Shader signature parsed, " ++ show e1 ++ show e2
   whitespace
   reservedOp "="
   e <- parseBlock
-  let shader = Shader t (map toVarying e1) (map toVarying e2) e
+  let shader = Shader t (case t of
+                          VertShader -> map toAttribute e1
+                          FragShader -> map toVarying e1) (map toVarying e2) e
   -- add this shader to the env
   addShader (n,shader)
   return ()
@@ -371,14 +369,10 @@ parseShader = try $ do
 -- | special composition parsing
 parseCompShader :: Parser ()
 parseCompShader = try $ do
-  DT.traceM "parsing shader..."
   t <- listTrans [("vert", VertShader), ("frag", FragShader)]
-  DT.traceM $ "Shader type is " ++ (show t)
   n <- lowIdentifier
-  DT.traceM $ "Shader name is " ++ n
   reservedOp ":"
   (e1,e2) <- parseShaderSignature
-  DT.traceM $ "Shader signature parsed, " ++ show e1 ++ show e2
   whitespace
   reservedOp "="
   s1 <- lowIdentifier
@@ -401,7 +395,6 @@ getInputs (Shader _ e _ _) = e
 -- parse a single program
 parseProgram :: Parser ()
 parseProgram = try $ do
-  DT.traceM "parsing program..."
   n <- lowIdentifier
   reservedOp ":"
   reserved "Prog"
@@ -430,5 +423,9 @@ parseFDSSL =
 parseFDSSLFile :: String -> IO (Either ParseError ([(String,Prog)]))
 parseFDSSLFile f = do
   c <- readFile f
-  DT.traceM "starting parse..."
   return $ runParser (parseFDSSL <* eof) initialState f c
+
+parseFDSSLFiles :: [String] -> IO (Either ParseError ([(String,Prog)]))
+parseFDSSLFiles fs = do
+  c <- mapM readFile fs
+  return $ runParser (parseFDSSL <* eof) initialState "FDSSL Programs" (intercalate "\n" c)
