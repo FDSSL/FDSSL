@@ -173,7 +173,7 @@ typeCheckProg :: TypeChecked m => Prog -> m Prog
 typeCheckProg p@(Prog e f s s')
                    | shaderType s  /= VertShader = throwError "First shader must be a vertex shader"
                    | shaderType s' /= FragShader = throwError "Second shader must be a fragment shader"
-                   | outEnv s /= inEnv s'        = throwError "Variables passed from the first shader to the second shader must be the equal."
+                   | outEnv s /= inEnv s'        = throwError $ "Variable types & names passed from the Vertex shader to the Fragment shader must be equivalent: " ++ show (unames $ outEnv s) ++ " and " ++ show (unames $ inEnv s')
                    | otherwise                   = do
                                                      initEnv e f
                                                      typeCheckFuncs
@@ -416,7 +416,7 @@ checkSame es = do
 -- | Runs the type checker on a named prog, returning an error or the same named prog
 runTypeChecker :: (String,Prog) -> Either Error (String,Prog)
 runTypeChecker (s,p) = case runExceptT $ runStateT (typeCheckProg p) (Comb [] [] []) of
-                    (Left err) -> Left $ "Program " ++ s ++ ": " ++ err     -- failed
+                    (Left err) -> Left $ "TypeError in Program " ++ s ++ ": " ++ err     -- failed
                     (Right e)  -> case e of
-                                    (Left err') -> Left $ "Program " ++ s ++ ": " ++ err' -- failed
+                                    (Left err') -> Left $ "TypeError in Program " ++ s ++ ": " ++ err' -- failed
                                     (Right _)   -> Right (s,p) -- passed

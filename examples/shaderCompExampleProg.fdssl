@@ -1,0 +1,47 @@
+// An example of shader composition
+
+uniform Mat4 uProjectionMatrix
+uniform Mat4 uModelViewMatrix
+uniform Float	uTime
+
+// shader takes in standard vertex & outputs a vec4 position & sets the gl_Position that way
+// Also outputes a pos that is modified by an externally defined clock
+vert v1 : (Vec3 aVertPos) -> (Vec4 pos) = {
+  out pos (vec4 aVertPos[x] sin(aVertPos[y] + uTime * 3.7) aVertPos[z] 1.0)
+  set gl_Position pos
+}
+
+// shader uses a vec4 to calculate the model view projection matrix & set the gl_Position
+// This shader uses 'pos' although it is not defined here
+// On its own this is invalid, but is acceptable when composed with v1 to have access to 'pos'
+// Composition is just a gluing together of shaders
+vert v2 : (Vec3 aVertPos) -> (Vec3 vXYZ) = {
+  set gl_Position (uProjectionMatrix * uModelViewMatrix * pos)
+  out vXYZ (vec3 pos[x] pos[y] pos[z])
+}
+
+// shader composition
+vert finalVert : (Vec3 aVertPos) -> (Vec3 vXYZ, Vec4 pos) = v2 . v1
+
+// basic fragment shader that takes nothing & colors default
+frag f1 : (Vec3 vXYZ) -> () = {
+  mut Vec4 col = vec4 0.5 0.5 0.5 1.0
+  set gl_FragColor col
+}
+
+// more advanced fragment shader that does some coloring based on pos & time
+frag f2 : (Vec4 pos) -> () = {
+  mut Float r = pos[0]
+  mut Float g = sin (pos[1] + uTime * 3.7)
+  mut Float b = pos[2]
+  set gl_FragColor (vec4 r g b 1.0)
+}
+
+frag finalFrag : (Vec3 vXYZ, Vec4 pos) -> () = f2 . f1
+
+// the final program
+// An interesting note, we only type check programs
+// which contain the uniforms and the final shaders.
+// Due to this shaders can be incomplete until they are finally
+// composed together to produce a complete & type-correct definition in a program
+shaderCompExampleProg : Prog = mkProg finalVert finalFrag

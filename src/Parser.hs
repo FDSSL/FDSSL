@@ -388,7 +388,7 @@ parseCompShader = try $ do
     (Just q) -> do
       addShader (n,q)
       return ()
-    Nothing  -> unexpected "bad shader comp"
+    Nothing  -> unexpected "Bad shader composition"
 
 -- | Get the inputs to this shader (attributes or varyings)
 getInputs :: Shader -> Env

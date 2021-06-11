@@ -40,7 +40,4 @@ frag f2 : (Vec3 vXYZ) -> () = {
   set gl_FragColor col
 }
 
-// TODO composition still isn't done yet
-//frag fComp : (Vec3 vXYZ) -> () = f2 . f1
-
 e4 : Prog = mkProg v2 f2

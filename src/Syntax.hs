@@ -174,28 +174,30 @@ guard :: Bool -> Maybe ()
 guard True  = Just ()
 guard False = Nothing
 
-unique :: Ord a => [a] -> [a] -> [a]
-unique l r = S.toList $ S.intersection (S.fromList l) (S.fromList r)
+-- | Retrive duplicates (if any) from a list
+duplicates :: Ord a => [a] -> [a] -> [a]
+duplicates l r = S.toList $ S.intersection (S.fromList l) (S.fromList r)
 
 class Composable a where
  comp :: a -> a -> Maybe a
 
 instance Composable Env where
-  comp l r = do
-               guard (null $ unique l r)
-               return (l ++ r)
+  comp l r = return $ S.toList $ S.fromList $ l ++ r
 
 
 -- This could be a case for Monoid
 instance Composable Shader where
   comp s s' = do
+                 -- can only compose shaders of the same type
                  guard (shaderType s == shaderType s')
-                 ine  <- comp (inEnv s)  (inEnv s')
-                 oute <- comp (outEnv s) (outEnv s')
-                 return $ Shader (shaderType s) ine oute (shaderBody s ++ shaderBody s')
+                 -- simply join the inputs & outputs uniquely
+                 let ui = S.toList $ S.fromList $ inEnv s ++ inEnv s'
+                 let uo = S.toList $ S.fromList $ outEnv s ++ outEnv s'
+                 -- return a new composite shader
+                 return $ Shader (shaderType s) ui uo (shaderBody s ++ shaderBody s')
 
 
--- | Program is a Global Env + Attr Env + Vertex Shader + Fragment Shader
+-- | Program contains an Env, Functions, a Vertex shader and a Fragment shader
 data Prog = Prog Env Funcs Shader Shader
   deriving Show
 
@@ -244,6 +246,7 @@ instance Ord Opaque where
 
 -- during evaluation, a value can be wrapped into a known expr if it derives wrappable
 -- so we can do w/e we want for these, functions, and wrap the results without having to do it explicitly ourselves every time, it's either supported or it's not
+-- this is a vestige of sorts, and was more relevant when we wrote programs in their AST form directly within Haskell
 class Wrappable a where
   wrap :: a -> Expr
 

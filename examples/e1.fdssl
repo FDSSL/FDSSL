@@ -1,4 +1,5 @@
-// Idea for syntax of an FDSSL shader
+// Idea for syntax of an FDSSL program
+// Contains various shaders, and only uses some of them in the final program
 
 uniform Mat4 uProjectionMatrix
 uniform Mat4 uModelViewMatrix
@@ -40,8 +41,6 @@ vert v2 : (Vec3 aVertPos) -> (Vec3 vXYZ) = {
   out vXYZ aVertPos
 }
 
-//vert v12 : (Vec3 aVertPos) -> (Vec3 vXYZ) = v2 . v1
-
 frag f1 : () -> () = {
  set gl_FragColor (vec4 0.5 0.5 0.5 1.0)
 }
@@ -55,7 +54,5 @@ frag f2 : (Vec3 vXYZ) -> () = {
 
   set gl_FragColor col
 }
-
-//frag f12 : Vec3 vXYZ -> () = f2 . f1
 
 e1 : Prog = mkProg v2 f2
