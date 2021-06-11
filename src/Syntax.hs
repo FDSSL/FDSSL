@@ -100,7 +100,7 @@ type Block = [Expr]
 type Funcs = [(Maybe ShaderType, Func)]
 
 data ShaderType = VertShader | FragShader
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 -- | Shaders have a type, a set of inputs, and a set of outputs, as well as an expr
 data Shader = Shader {
@@ -135,20 +135,26 @@ instance Composable Shader where
                  return $ Shader (shaderType s) ine oute (shaderBody s ++ shaderBody s')
 
 
--- program is a Global Env + Attr Env + Vertex Shader + Fragment Shader
+-- | Program is a Global Env + Attr Env + Vertex Shader + Fragment Shader
 data Prog = Prog Env Funcs Shader Shader
 
+-- | An opaque type is one that is external to a stage in a pipeline,
+-- where a stage is either the Vertex or Fragment shader
 data OpaqueType = Uniform | Attribute | Varying
   deriving (Eq)
+
+-- | An opaque value is external value with a given modifier, known type, and a name
+-- Opaque values correspond to values provided outside from a shader stage (or outside from the whole program entirely).
+-- Their values are not capable of being known in their context where they are received into a stage.
 data Opaque = Opaque {
-  opaqueType :: OpaqueType,
+  opaqueType  :: OpaqueType,
   opaqueVType :: Type,
-  opaqueName :: String
+  opaqueName  :: String
   }
 
 -- top-level exprs, similar to statements
 
--- func has a name, a list of name-type pairs, it's result type, and an expr
+-- | Func has a name, a list of name-type pairs, it's result type, and an expr
 data Func = Func {
   funcName :: String,
   funcParams :: [(String,Type)],
@@ -200,4 +206,3 @@ varying = Opaque Varying
 
 uniform :: Type -> String -> Opaque
 uniform = Opaque Uniform
-
