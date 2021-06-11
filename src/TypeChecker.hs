@@ -35,7 +35,6 @@ type MonadCheck m = (
   MonadState AllEnvs m,
   MonadError Error m
                     )
-type CheckM a = ExceptT Error (State AllEnvs) a
 
 shaderVals :: [(String,(ShaderType,Type))]
 shaderVals = [
@@ -166,7 +165,10 @@ typeCheckFuncs = do
 
 
 typeCheckShader :: MonadCheck m => Shader -> m ()
-typeCheckShader (Shader t ie oe b) = undefined
+typeCheckShader (Shader t _ oe b) = undefined
+  -- TODO, for the shader type, verify that no functions beyond this shader type are used
+  -- TODO, for the inputs, add them to the env as read-only vars
+  -- TODO, for the outputs, verify ALL of them are set at the end
 
 
 
@@ -218,9 +220,9 @@ checkExpr (Out name expr)      = do
 
 
 
-checkExpr (Branch c e e') = undefined
-checkExpr (For c (Just n) b) = undefined
-checkExpr (For c Nothing b) = undefined
+checkExpr (Branch c e e') = undefined -- TODO verify condition is a Boolean ultimately, and then type-check each other expression
+checkExpr (For c (Just n) b) = undefined -- TODO verify condition is ONLY an int, 'n' doesn't exist in the environment yet, then check the block
+checkExpr (For c Nothing b) = undefined -- TODO verify condition is ONLY an int, then check the block
 checkExpr (SComment _) = return (TNull, Nothing)
 checkExpr (BComment _) = return (TNull, Nothing)
 checkExpr (App n p) = do
@@ -230,9 +232,9 @@ checkExpr (App n p) = do
                         when (any (uncurry (/=)) (zip (map snd p) (map fst ps))) (throwError $ "Function " ++ n ++ " called with incorrect parameters")
                         return (t, stype)
 
-checkExpr (BinOp o e e') = undefined
-checkExpr (AccessN name member) = undefined
-checkExpr (AccessI name idx) = undefined
+checkExpr (BinOp o e e') = undefined -- TODO verify 1st the L/R args are the same, 2nd that they are either Int,Float,Double for +,-,/,*,% OR including Bool for the relation ops
+checkExpr (AccessN name member) = undefined -- TODO verify name exists, and that it is a vec2 OR mat, and member is x,y,z,w, depending
+checkExpr (AccessI name idx) = undefined -- TODO verify name exists, and that id is 0-4 depending
 
 -- | Runs the type checker on a named prog, returning an error or the same named prog
 runTypeChecker :: (String,Prog) -> Either Error (String,Prog)
