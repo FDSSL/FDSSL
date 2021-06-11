@@ -1,0 +1,26 @@
+// example that deforms a shape, but fixes the color by position
+
+uniform Mat4 uProjectionMatrix
+uniform Mat4 uModelViewMatrix
+uniform Float	uTime
+
+// better shader, w/ an output, varyings
+vert v : (Vec3 aVertPos) -> (Vec3 vXYZ) = {
+  mut Vec4 pos = vec4 (aVertPos[x] * cos(uTime)) aVertPos[y] aVertPos[z] 1.0
+  set gl_Position (uProjectionMatrix * uModelViewMatrix * pos)
+
+  out vXYZ aVertPos
+}
+
+
+frag f : (Vec3 vXYZ) -> () = {
+  mut Float r = vXYZ[0]
+  mut Float g = vXYZ[1]
+  mut Float b = vXYZ[2]
+
+  mut Vec4 col = vec4 r cos(g) b 1.0
+
+  set gl_FragColor col
+}
+
+e3 : Prog = mkProg v f

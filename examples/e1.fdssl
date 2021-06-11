@@ -1,12 +1,13 @@
 // Idea for syntax of an FDSSL shader
 
-uniform Mat4 uProjMat
-uniform Mat4 uMVM
+uniform Mat4 uProjectionMatrix
+uniform Mat4 uModelViewMatrix
 uniform Int uValue
 
 // an example of a basic function
 wave : (Float x) -> Float = {
-  sin (x)
+  mut Float s = sin (x)
+  s
 }
 
 fact : (Int x) -> Int = {
@@ -24,7 +25,8 @@ fact : (Int x) -> Int = {
 
 // basic shader
 vert v1 : (Vec3 aVertPos) -> () = {
-  set gl_Position aVertPos
+  mut Vec4 pos = vec4 aVertPos[x] aVertPos[y] aVertPos[z] 1.0
+  set gl_Position (uProjectionMatrix * uModelViewMatrix * pos)
 }
 
 // better shader, w/ an output, varyings
@@ -32,7 +34,8 @@ vert v2 : (Vec3 aVertPos) -> (Vec3 vXYZ) = {
   mut Float x = 0.1
   mut Float y = 0.5
 
-  set gl_Position (uProjMat * uMVM * aVertPos)
+  mut Vec4 pos = vec4 aVertPos[x] aVertPos[y] aVertPos[z] 1.0
+  set gl_Position (uProjectionMatrix * uModelViewMatrix * pos)
 
   out vXYZ aVertPos
 }
@@ -44,15 +47,15 @@ frag f1 : () -> () = {
 }
 
 frag f2 : (Vec3 vXYZ) -> () = {
-  const Float r = wave (vXYZ[0])
-  const Float g = wave (vXYZ[1])
-  const Float b = wave (vXYZ[2])
+  mut Float r = wave (vXYZ[0])
+  mut Float g = wave (vXYZ[1])
+  mut Float b = wave (vXYZ[2])
 
-  const Vec4 col = vec4 r g b 1.0
+  mut Vec4 col = vec4 r g b 1.0
 
   set gl_FragColor col
 }
 
 //frag f12 : Vec3 vXYZ -> () = f2 . f1
 
-prog : Prog = mkProg v1 f1
+e1 : Prog = mkProg v2 f2

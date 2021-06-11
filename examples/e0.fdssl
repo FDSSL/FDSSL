@@ -4,6 +4,7 @@ uniform Float test2
 
 
 vert v : () -> () = {
+  set gl_Position vec4 0 1 0 1
   set gl_Position vec4 1 1 1 1
 }
 
@@ -11,4 +12,4 @@ frag f : () -> () = {
   set gl_FragColor vec4 0 1 0 1
 }
 
-prog1 : Prog = mkProg v f
+e0 : Prog = mkProg v f
