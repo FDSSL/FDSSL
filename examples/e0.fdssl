@@ -1,11 +1,7 @@
-
-uniform Mat4 test1
-uniform Float test2
-
+uniform Float uVar
 
 vert v : () -> () = {
   set gl_Position vec4 0 1 0 1
-  set gl_Position vec4 1 1 1 1
 }
 
 frag f : () -> () = {

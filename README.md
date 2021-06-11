@@ -1,5 +1,10 @@
 # Functional Domain Specific Shader Language
 
+## Project Submission
+- README (the following document)
+- Project Implementation (included in this repository)
+- [Project Report included as a PDF](CS_583_Project_Report_Holliday_Friedman.pdf)
+
 ## Introduction
 
 FDSSL is a domain specific functional language that is translated into the OpenGL Shader Language (GLSL).
