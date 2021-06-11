@@ -4,6 +4,8 @@ import Syntax
 import Pretty
 import Examples
 import Parser
+import TypeChecker
+import Data.Either
 
 main :: IO ()
 main = do
@@ -26,14 +28,20 @@ evalProg fn = do
   case r of
     (Left l)  -> putStrLn $ show l -- failed...
     (Right progList) -> do
-      -- compile the individual programs to GLSL shaders
-      ls <- mapM compileProgram progList
-      -- write out these shaders for each program using
-      -- the program name (not the file name)
-      mapM (\(s,(v,f)) -> do
-        writeFile (s ++ ".vert") v
-        writeFile (s ++ ".frag") f
-        putStrLn $ "\n* Vertex shader written to " ++ s ++ ".vert"
-        putStrLn $ "* Fragment shader written to " ++ s ++ ".frag") ls
-      putStrLn $ "* Produced " ++ (show $ length ls) ++ " GLSL program(s)\n"
-      return ()
+      -- typecheck each of these programs
+      let typecheckedProgs = map runTypeChecker progList
+      let errors = lefts typecheckedProgs
+      case length errors > 0 of
+        True  -> error $ show errors
+        False -> do
+          -- compile the individual named programs to GLSL shaders
+          ls <- mapM compileProgram (rights typecheckedProgs)
+          -- write out these shaders for each program using
+          -- the program name (not the file name)
+          mapM (\(s,(v,f)) -> do
+            writeFile (s ++ ".vert") v
+            writeFile (s ++ ".frag") f
+            putStrLn $ "\n* Vertex shader written to " ++ s ++ ".vert"
+            putStrLn $ "* Fragment shader written to " ++ s ++ ".frag") ls
+          putStrLn $ "* Produced " ++ (show $ length ls) ++ " GLSL program(s)\n"
+          return ()

@@ -119,6 +119,9 @@ timeFrag = Shader FragShader [vXYZ] [] [
 -- Programs
 --
 
+prog :: Prog
+prog = Prog [uProjectionMatrix,uModelViewMatrix] [(Nothing, fInc)] mvpVert posFrag
+
 -- | Simple shader program that shows RGB color values on a surface
 prog1 :: Maybe Prog
 prog1 = comp basicVert mvpVert >>= \v -> Just $ Prog [uProjectionMatrix,uModelViewMatrix] [(Nothing, fInc)] v posFrag

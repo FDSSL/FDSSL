@@ -9,7 +9,7 @@ module TypeChecker where
 import Syntax
 
 import Control.Monad.Except   (ExceptT,MonadError,runExceptT,throwError)
-import Control.Monad.State    (State,MonadState,get,put,modify)
+import Control.Monad.State    (State,MonadState,get,put,modify,runStateT)
 import Control.Monad          (guard, when, sequence, mapM)
 import Data.Maybe
 
@@ -125,8 +125,8 @@ initEnv e f = do
 
 typeCheckProg :: MonadCheck m => Prog -> m Prog
 typeCheckProg p@(Prog e f s s')
-                   | shaderType s  /= FragShader = throwError "First shader must be a fragment shader"
-                   | shaderType s' /= VertShader = throwError "Second shader must be a vertex shader"
+                   | shaderType s  /= VertShader = throwError "First shader must be a vertex shader"
+                   | shaderType s' /= FragShader = throwError "Second shader must be a fragment shader"
                    | outEnv s /= inEnv s'        = throwError "Variables passed from the first shader to the second shader must be the equal."
                    | otherwise                   = do
                                                      initEnv e f
@@ -233,3 +233,11 @@ checkExpr (App n p) = do
 checkExpr (BinOp o e e') = undefined
 checkExpr (AccessN name member) = undefined
 checkExpr (AccessI name idx) = undefined
+
+-- | Runs the type checker on a named prog, returning an error or the same named prog
+runTypeChecker :: (String,Prog) -> Either Error (String,Prog)
+runTypeChecker (s,p) = case runExceptT $ runStateT (typeCheckProg p) (Comb [] [] []) of
+                    (Left err) -> Left $ "Program " ++ s ++ ": " ++ err     -- failed
+                    (Right e)  -> case e of
+                                    (Left err') -> Left $ "Program " ++ s ++ ": " ++ err' -- failed
+                                    (Right _)   -> Right (s,p) -- passed
