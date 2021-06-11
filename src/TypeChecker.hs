@@ -57,8 +57,18 @@ lookupG _ _ [] = Nothing
 lookupF :: String -> Funcs -> Maybe (Maybe ShaderType, Func)
 lookupF = lookupG (funcName . snd)
 
+lookupFM :: MonadCheck m => String -> Funcs -> m (Maybe ShaderType, Func)
+lookupFM n fs = case lookupF n fs of
+                  Just f  -> return f
+                  Nothing -> throwError $ "Function " ++ n ++ " not found"
+
 lookupE :: String -> Env -> Maybe Opaque
 lookupE = lookupG opaqueName
+
+lookupEM :: MonadCheck m => String -> Env -> m Opaque
+lookupEM n es = case lookupE n es of
+                  Just e  -> return e
+                  Nothing -> throwError $ "Function " ++ n ++ " not found"
 
 fnames :: Funcs -> [String]
 fnames = map (funcName . snd)
@@ -180,6 +190,7 @@ checkExpr (Mut typ name expr)   = get >>= checkAssign True typ name expr
 checkExpr (Const typ name expr) = get >>= checkAssign False typ name expr
 checkExpr (Update name expr)    = do
                                     env@(Comb e _ l) <- get
+
                                     when (not $ isDefined name env) (throwError $ "Variable " ++ name ++ " not defined")
                                     when (lookupE name e /= Nothing) (throwError $ "Cannot assign opaque variable " ++ name)
                                     case lookup name l of
@@ -215,7 +226,9 @@ checkExpr (BComment _) = return (TNull, Nothing)
 checkExpr (App n p) = do
                         (Comb e f l) <- get
                         ps <- mapM checkExpr p
-                        return (TNull, Nothing)
+                        (stype, (Func _ p t _)) <- lookupFM n f
+                        when (any (uncurry (/=)) (zip (map snd p) (map fst ps))) (throwError $ "Function " ++ n ++ " called with incorrect parameters")
+                        return (t, stype)
 
 checkExpr (BinOp o e e') = undefined
 checkExpr (AccessN name member) = undefined
