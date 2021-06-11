@@ -6,23 +6,22 @@ FDSSL is a domain specific functional language that is translated into the OpenG
 The goal of the language is to simplify the implementation of Shaders in order to make
 shader programming more approachable, with the added feature of making Shaders composable.
 
-At a high level, we describe GLSL programs with the following semantic domain.
-```
-Env -> Env -> (Env,Expr) -> Env
-```
+At a high level, FDSSL programs operate with at two different levels. The first being the Expression level, where Exprs are written to describe operations that will later be performed in GLSL shaders. The semantic domain of Expressions is `(Maybe Expr,Env)`, where expressions may produce another simplified expression (such as a value) and a modified state. Some expressions do not change the state, but others will, and the overall meaning of FDSSL programs is a transformation of GLSL state and shaders that will ultimately used to express GLSL programs.
 
-Where an `Env` is equivalent to a list of named functions.
+The second level is the Shader level, where FDSSL is used to describe shaders as components of the GLSL pipeline. Shaders allow transformation of vertices and coloring of fragments in the order from vertices to fragments. The semantic domain of Shaders is expressed simply as `Env`, since shaders will reference and add to environments as they are evaluated in the GLSL pipeline.
 
-More explicitly, we can write this as:
+For reference, an `Env` is equivalent to a list of named functions with a possibility of being Shader specific. If a function is shader specific, it is only available within the evaluating context of that shader. This is important for certain functions such as `texture2D` which are only available to the Fragment shader. The reason for this difference is due to two different instruction sets being used on graphics hardware to execute these different stages, which allows for each stage to be optimized for its own case and to run faster during evaluation. This is beyond the scope of FDSSL, but poses a constraint we must keep in mind.
+
+We can describe the evaluation of FDSSL as follows, looking at the level of shaders (which include expressions that would also be evaluated along the way).
 ```
-GlobalEnv -> PriorResultEnv -> (ShaderEnv,Expr) -> ShaderResultEnv
+GlobalEnv -> PriorResultEnv -> (ShaderEnv,[Expr]) -> ShaderResultEnv
 ```
 To explain this, a global environment is shared across all shaders. Each shader also gets results that are passed to it from a prior stage, which is produced by some prior step that is not known in advance. Finally, every shader has its own environment and an expression to evaluation in that environment. The result of evaluating this shader produces a result environment, which is then fed into the next stage (if there is a following stage).
 
 ## Instructions to Run
 
-This project uses Stack now. Running this program results in a simple shader program
-(Vertex + Fragment) outputted to STDOUT. To run these example shader programs, we've written up a simple webpage to test them in, [https://www.uphouseworks.com/fdssl-test.html](https://www.uphouseworks.com/fdssl-test.html).
+This project uses Stack. Running this program results in several simple shader programs
+(Vertex + Fragment) written to the directory from which you ran this project (.vert & .frag respectively). To run these example shader programs, we've written up a simple webpage to test them in, [https://www.uphouseworks.com/fdssl-test.html](https://www.uphouseworks.com/fdssl-test.html).
 
 To run with stack, you can use:
 ```
@@ -39,18 +38,32 @@ once that's finished, you can evaluate some FDSSL programs like so
 > evalProg "examples/e0.txt"
 > evalProg "examples/e1.txt"
 > evalProg "examples/e2.txt"
+> evalProg "examples/e3.txt"
+> evalProg "examples/e4.txt"
+> evalProg "examples/shaderCompExampleProg.txt"
 ```
-Each of these is a valid FDSSL program, but only the first two produce actual shaders. The last is more a test file. Currently, shaders will not run as expected, as we're still working on changing the pretty printer after introducing the parser.
+Each of these is a valid FDSSL program, that will produce shaders. Each of these shaders is intended to be used together, and will result in their encoded visual effects being displayed. The link above is a WebGL instance where the appropriate uniform (global) variables have been setup to work with these shaders. These shaders can work in other OpenGL applications as well, but they are targeted towards WebGL currently to make it easier to demonstrate functionality to others. This is helpful, as GLSL varies slightly in supported syntax across versions. Using WebGL does not eliminate this variance, but most WebGL instances are fairly consistent around using Embedded OpenGL (GLES), which is simpler.
 
 ## Structure
 
 The structure of FDSSL is:
-- `Examples`: various vertex & fragment shaders written in FDSSL, with a pair of example programs
+- `Examples`: various vertex & fragment shaders written in FDSSL, with a pair of example programs (these are rather old now, but good for abstract syntax reference)
 - `Main`: easiest way to run and print shader programs
-- `Pretty`: our pretty printer
+- `Pretty`: Holds the pretty printer for FDSSL, which currently outputs directly to GLSL concrete syntax
 - `Syntax`: Holds the abstract syntax for FDSSL
 - `Parser`: Holds the parser for FDSSL
-- `TypeChecker`: Empty, but will hold our type checker for programs written in FDSSL abstract syntax
+- `TypeChecker`: Holds the TypeChecker for FDSSL
+
+Together, the evaluation flow from FDSSL to GLSL looks like this:
+
+```
+FDSSL Concrete Program -> Parser -> FDSSL AST -> TypeChecker -> Pretty Printer -> GLSL Concrete Shaders
+```
+
+For future work, we would like to add `Compiler` and `GLSLSyntax` modules to make it simpler to compile to GLSL without tight coupling. This would make our flow look like:
+```
+FDSSL Concrete Program -> Parser -> FDSSL AST -> TypeChecker -> Compiler -> GLSL AST -> Pretty Printer -> GLSL Concrete Shaders
+```
 
 ## Milestone 2 (May 26th)
 
