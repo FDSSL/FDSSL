@@ -11,6 +11,7 @@ import Syntax
 import Control.Monad.Except   (ExceptT,MonadError,runExceptT,throwError)
 import Control.Monad.State    (State,MonadState,get,put,modify,runStateT)
 import Control.Monad          (guard, when, sequence, mapM)
+import qualified Data.Set as S
 import Data.Maybe
 
 -- tyep check to make sure applications are good
@@ -60,7 +61,7 @@ lookupF = lookupG (funcName . snd)
 lookupFM :: MonadCheck m => String -> Funcs -> m (Maybe ShaderType, Func)
 lookupFM n fs = case lookupF n fs of
                   Just f  -> return f
-                  Nothing -> throwError $ "Function " ++ n ++ " not found"
+                  Nothing -> throwError $ "Function " ++ n ++ " is not defined"
 
 lookupE :: String -> Env -> Maybe Opaque
 lookupE = lookupG opaqueName
@@ -68,7 +69,12 @@ lookupE = lookupG opaqueName
 lookupEM :: MonadCheck m => String -> Env -> m Opaque
 lookupEM n es = case lookupE n es of
                   Just e  -> return e
-                  Nothing -> throwError $ "Function " ++ n ++ " not found"
+                  Nothing -> throwError $ "Function " ++ n ++ " is not defined"
+
+lookupLM :: MonadCheck m => String -> Locals -> m (Type, Bool)
+lookupLM n ls = case lookup n ls of
+                  Just l -> return l
+                  Nothing -> (throwError $ "Local variable " ++ n ++ " is not defined")
 
 fnames :: Funcs -> [String]
 fnames = map (funcName . snd)
@@ -216,11 +222,25 @@ checkExpr (Out name expr)      = do
                                        return (etype, Just stype)
                                      _ -> throwError $ "Variable " ++ name ++ " can not be set as an out."
 
+checkExpr (Branch c e e') = do
+                              (etype, stype) <- checkExpr c
+                              when (etype /= TB) (throwError "Branch conditions must be of type Bool")
+                              es <- mapM checkExpr e
+                              es' <- mapM checkExpr e'
+                              let (etype, stype) = last es
+                              let (etype', stype') = last es'
+                              when (etype /= etype') (throwError "Branches must be of the same type")
+                              when (stype /= stype') (throwError "Branche shader environments must be of the same type")
+                              return (etype, stype)
 
-
-checkExpr (Branch c e e') = undefined
 checkExpr (For c (Just n) b) = undefined
-checkExpr (For c Nothing b) = undefined
+checkExpr (For c Nothing b) = do
+                                (etype, stype) <- checkExpr c
+                                when (etype /= TI) (throwError "For loop count must be an integer")
+                                es <- mapM checkExpr b
+                                let (etype', stype') = last es
+                                when (stype /= stype') (throwError "Shader environments must be the same between for loop condition and its body")
+                                return (etype', stype')
 checkExpr (SComment _) = return (TNull, Nothing)
 checkExpr (BComment _) = return (TNull, Nothing)
 checkExpr (App n p) = do
@@ -230,9 +250,55 @@ checkExpr (App n p) = do
                         when (any (uncurry (/=)) (zip (map snd p) (map fst ps))) (throwError $ "Function " ++ n ++ " called with incorrect parameters")
                         return (t, stype)
 
-checkExpr (BinOp o e e') = undefined
-checkExpr (AccessN name member) = undefined
-checkExpr (AccessI name idx) = undefined
+checkExpr (BinOp _ e e') = do
+                             (etype, stype) <- checkExpr e
+                             (etype', stype') <- checkExpr e'
+                             when (etype /= etype') (throwError $ "Expression types to not match in binrary operation")
+                             when (stype /= stype') (throwError $ "Shader types to not match in binrary operation")
+                             return (etype, stype)
+
+checkExpr (AccessN name member) = do
+                                    (Comb e _ ls) <- get
+                                    case (lookup name ls, lookupE name e, lookup name shaderVals) of
+                                         (Just (t,m), _, _) -> return (t, Nothing)
+                                         (_,Just (Opaque _ t _), _) -> return (t, Nothing)
+                                         (_,_,Just (s,t)) -> return (t, Just s)
+                                         _ -> throwError $ "Collection " ++ name ++ " is not defined"
+
+checkExpr (AccessI name idx) = do
+                                 (Comb e _ ls) <- get
+                                 case (lookup name ls, lookupE name e, lookup name shaderVals) of
+                                         (Just (t,m), _, _) -> return (t, Nothing)
+                                         (_,Just (Opaque _ t _), _) -> return (t, Nothing)
+                                         (_,_,Just (s,t)) -> return (t, Just s)
+                                         _ -> throwError $ "Collection " ++ name ++ " is not defined"
+
+
+checkExpr (I _) = return (TI,Nothing)
+checkExpr (B _) = return (TB,Nothing)
+checkExpr (F _) = return (TF,Nothing)
+checkExpr (D _) = return (TF,Nothing)
+checkExpr (V2 (e,e')) =  do
+                              (_, stype) <- checkSame [e, e']
+                              return (TV2, stype)
+checkExpr (V3 (e,e',e'')) =  do
+                              (_, stype) <- checkSame [e, e', e'']
+                              return (TV3, stype)
+checkExpr (V4 (e,e',e'',e''')) = do
+                              (_, stype) <- checkSame [e, e', e'', e''']
+                              return (TV4, stype)
+
+checkExpr (Mat4 _) = return (TMat4, Nothing)
+checkExpr (Array e) = checkSame e
+
+checkSame :: MonadCheck m => [Expr] -> m (Type, Maybe ShaderType)
+checkSame es = do
+                   ps <- mapM checkExpr es
+                   let ptypes = map fst ps
+                   let stypes = map snd ps
+                   when (S.size (S.fromList ptypes) /= 1) (throwError "Associated (Vector or Array) expressions must be all the same types.")
+                   when (S.size (S.fromList stypes) /= 1) (throwError "Associated (Vector or Array) epressions must be all the same shader types.")
+                   return (head ptypes, head stypes)
 
 -- | Runs the type checker on a named prog, returning an error or the same named prog
 runTypeChecker :: (String,Prog) -> Either Error (String,Prog)

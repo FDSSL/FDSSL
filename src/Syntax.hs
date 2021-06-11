@@ -100,7 +100,7 @@ type Block = [Expr]
 type Funcs = [(Maybe ShaderType, Func)]
 
 data ShaderType = VertShader | FragShader
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 -- | Shaders have a type, a set of inputs, and a set of outputs, as well as an expr
 data Shader = Shader {
