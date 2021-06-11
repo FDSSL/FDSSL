@@ -179,9 +179,8 @@ checkExpr :: MonadCheck m => Expr -> m (Type, Maybe ShaderType)
 checkExpr (Mut typ name expr)   = get >>= checkAssign True typ name expr
 checkExpr (Const typ name expr) = get >>= checkAssign False typ name expr
 checkExpr (Update name expr)    = do
-                                    env@(Comb e f l) <- get
+                                    env@(Comb e _ l) <- get
                                     when (not $ isDefined name env) (throwError $ "Variable " ++ name ++ " not defined")
-
                                     when (lookupE name e /= Nothing) (throwError $ "Cannot assign opaque variable " ++ name)
                                     case lookup name l of
                                       Nothing -> throwError "Variable not found"
@@ -192,14 +191,20 @@ checkExpr (Update name expr)    = do
                                                         return (t, stype)
 
 checkExpr (Out name expr)      = do
-                                   (Comb e f l) <- get
-                                   case lookupE name e of
-                                     Nothing -> throwError $ "Cannot push value to out variable " ++ name
-                                     Just (Opaque otype typ n) -> do
-                                                                    (etype, stype) <- checkExpr expr
-                                                                    when (otype == Uniform || otype == Attribute) (throwError $ "Cannot modify opaque variable " ++ n)
-                                                                    when (etype /= typ) (throwError $ "Variable " ++ name ++ " does not match out type.")
-                                                                    return (TNull, Nothing)
+                                   (Comb e _ _) <- get
+                                   case (lookupE name e, lookup name shaderVals) of
+                                     (Just (Opaque otype typ n), Nothing) -> do
+                                       (etype, stype) <- checkExpr expr
+                                       when (elem otype [Uniform, Attribute]) (throwError $ "Cannot modify opaque variable " ++ n)
+                                       when (etype /= typ) (throwError $ "Variable " ++ name ++ " does not match out type.")
+                                       return (etype, stype)
+                                     (Nothing,                   Just (stype, svtype)) -> do
+                                       (etype, estype) <- checkExpr expr
+                                       when (etype /= svtype) (throwError $ "Variable " ++ name ++ " does not match out type.")
+                                       when (any (stype /=) estype) (throwError $ "Variable " ++ name ++ " does not match out type.")
+                                       return (etype, Just stype)
+                                     _ -> throwError $ "Variable " ++ name ++ " can not be set as an out."
+
 
 
 checkExpr (Branch c e e') = undefined
