@@ -40,6 +40,27 @@ data BOp =
   BitOr  |
   BitXor
 
+-- | Simple show instances for BinOps
+instance Show BOp where
+  show Add = "+"
+  show Sub = "-"
+  show Mul = "*"
+  show Div = "/"
+  show Mod = "%"
+
+  show And  = "&&"
+  show Or   = "||"
+  show Eq   = "=="
+  show Neq  = "!="
+  show Gte  = ">="
+  show Gt   = ">"
+  show Lte  = "<="
+  show Lt   = "<"
+
+  show BitAnd = "&"
+  show BitOr  = "|"
+  show BitXor = "^"
+
 data Type =
   TI |
   TB |
@@ -87,6 +108,7 @@ data Expr =
   BinOp BOp Expr Expr             | -- infix app
   AccessN String String           | -- structure access by name
   AccessI String Int                -- structure access by index
+  deriving Show
 
 isImm :: Expr -> Bool
 isImm (I _) = True
@@ -146,6 +168,7 @@ data Shader = Shader {
   outEnv :: Env,
   shaderBody :: [Expr]
 }
+  deriving Show
 
 guard :: Bool -> Maybe ()
 guard True  = Just ()
@@ -174,11 +197,17 @@ instance Composable Shader where
 
 -- | Program is a Global Env + Attr Env + Vertex Shader + Fragment Shader
 data Prog = Prog Env Funcs Shader Shader
+  deriving Show
 
 -- | An opaque type is one that is external to a stage in a pipeline,
 -- where a stage is either the Vertex or Fragment shader
 data OpaqueType = Uniform | Attribute | Varying
-  deriving (Eq)
+  deriving Eq
+
+instance Show OpaqueType where
+  show Uniform   = "uniform"
+  show Attribute = "attribute"
+  show Varying   = "varying"
 
 -- | An opaque value is external value with a given modifier, known type, and a name
 -- Opaque values correspond to values provided outside from a shader stage (or outside from the whole program entirely).
@@ -189,6 +218,9 @@ data Opaque = Opaque {
   opaqueName  :: String
   }
 
+instance Show Opaque where
+  show (Opaque ot t n) = (++";\n") . mconcat $ intersperse " " $ [show ot, show t, n]
+
 -- top-level exprs, similar to statements
 
 -- | Func has a name, a list of name-type pairs, it's result type, and an expr
@@ -198,6 +230,7 @@ data Func = Func {
   funcRetType :: Type,
   funcBody :: Block
   }
+  deriving Show
 
 apply :: (Block -> Block) -> Func -> Func
 apply f (Func n p t b) = Func n p t (f b)

@@ -8,35 +8,6 @@ import Syntax
 import Data.List
 import Control.Monad
 
--- | Simple show instances for BinOps
-instance Show BOp where
-  show Add = "+"
-  show Sub = "-"
-  show Mul = "*"
-  show Div = "/"
-  show Mod = "%"
-
-  show And  = "&&"
-  show Or   = "||"
-  show Eq   = "=="
-  show Neq  = "!="
-  show Gte  = ">="
-  show Gt   = ">"
-  show Lte  = "<="
-  show Lt   = "<"
-
-  show BitAnd = "&"
-  show BitOr  = "|"
-  show BitXor = "^"
-
-instance Show OpaqueType where
-  show Uniform   = "uniform"
-  show Attribute = "attribute"
-  show Varying   = "varying"
-
-instance Show Opaque where
-  show (Opaque ot t n) = (++";\n") . mconcat $ intersperse " " $ [show ot, show t, n]
-
 -- | Wraps a list with a pair of elements
 wrapList :: a -> a -> [a] -> [a]
 wrapList l r es = l : es ++ [r]
@@ -53,11 +24,11 @@ preface = intercalate "\n" [
   "#endif"] ++ "\n\n"
 
 -- | Represents indentation levels
-data Indent = Indent Indent | None
+data Indent = Indent Indent | NoIndent
 
 instance Show Indent where
   show (Indent t) = "\t" ++ show t
-  show None       = ""
+  show NoIndent   = ""
 
 -- | Pretty printer state describes a current indentation level
 -- & an ongoing printed program as state
@@ -270,9 +241,9 @@ prettyProg (e,funcs,s) = do
 runPrettyPrinter :: Prog -> IO (String,String)
 runPrettyPrinter (Prog e funcs v f) = do
   -- run for vertex shader
-  (a,b) <- runStateT (prettyProg (e,funcs,v)) (None,[])
+  (a,b) <- runStateT (prettyProg (e,funcs,v)) (NoIndent,[])
   -- run for fragment shader
-  (a',b') <- runStateT (prettyProg (e,funcs,f)) (None,[])
+  (a',b') <- runStateT (prettyProg (e,funcs,f)) (NoIndent,[])
   return (a,a')
 
 -- | Pretty prints an FDSSL program

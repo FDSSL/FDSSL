@@ -14,6 +14,8 @@ import Control.Monad          (guard, when, sequence, mapM)
 import qualified Data.Set as S
 import Data.Maybe
 
+import Debug.Trace as DT
+
 -- tyep check to make sure applications are good
 -- type check to make sure various bin ops and such are good
 
@@ -53,6 +55,23 @@ shaderVals = [
   ("gl_BaseVertex",(VertShader,TI)),
   ("gl_BaseInstance", (VertShader,TI))
  ]
+
+-- | Typed param
+type ParamType = Type
+-- | Return type of a function
+type RetType = Type
+
+-- | Builtin general-purpose shader functions
+shaderFuncs :: Funcs
+shaderFuncs = [
+  (Nothing, Func "sin" [("x",TF)] TF []),
+  (Nothing, Func "cos" [("x",TF)] TF [])]
+
+{-
+funcName :: String,
+funcParams :: [(String,Type)],
+funcRetType :: Type,
+-}
 
 -- | General lookup function
 lookupG :: Eq b => (a -> b) -> b -> [a] -> Maybe a
@@ -147,7 +166,7 @@ initEnv e f = do
                  -- when (funcs /= []) (throwError ("Multiple function definitions: " ++  show funcs))
                  -- when (uniforms /= []) (throwError ("Multiple uniform definition: " ++ show uniforms))
 
-                 put $ Comb e f []
+                 put $ Comb e (f ++ shaderFuncs) []
 
 -- | Type check an FDSSL Program
 typeCheckProg :: MonadCheck m => Prog -> m Prog
@@ -171,9 +190,11 @@ typeCheckProg p@(Prog e f s s')
 
 -- | Type check a block, aka a list of exprs
 checkBlock :: MonadCheck m => Block -> Type -> m (Type, Maybe ShaderType)
+checkBlock [] _     = return (TNull, Nothing)
 checkBlock (e:es) t = do
                        (etype, stype) <- checkExpr e
-                       return (TNull, Nothing)
+                       r <- checkBlock es t
+                       return r
 checkBlock (e:[]) t = do
                        (etype, stype) <- checkExpr e
                        when (isImm e && t /= etype) (throwError $ "Final expression of block does not match function return type")
@@ -213,12 +234,12 @@ typeCheckShader (Shader t ie oe b) = do
   ae <- get
   let outs = filter (\z -> elem z (getLocals ae)) shaderOutputs
   case length outs == length shaderOutputs of
-    False -> throwError $ "Your " ++ show t ++ " shader did not set all output variables."
+    False -> throwError $ "Your " ++ show t ++ " shader did not set all output variables: " ++ show (map fst shaderOutputs) ++ "\n" ++ (show $ getLocals ae)
     True  -> case outs == shaderOutputs of
               True  -> return () -- pass, parser already handles this part
               False -> throwError $ "Your " ++ show t ++ " shader set an output variable of incorrect type."
 
-
+-- | Type checks a given variable/ref
 checkVariable :: MonadCheck m => String -> m (Type, Maybe ShaderType)
 checkVariable name = do
   (Comb e _ ls) <- get
@@ -262,7 +283,7 @@ checkExpr (Update name expr)    = do
                                       Just (t,m)     -> do
                                         when (m == False) (throwError $ "Variable " ++ name ++ " cannot be modified")
                                         (etype, stype) <- checkExpr expr
-                                        when (etype /= t) (throwError $ "Variable " ++ name ++ " not the same type as assigned expression.")
+                                        when (etype /= t) (throwError $ "Variable " ++ name ++ " of type " ++ show t ++ " not the same type as assigned expression of type " ++ show etype)
                                         return (t, stype)
                                       -- built-in variable binding found, correlates to gl_pos or gl_col
                                       -- TODO no clue where to fix it from here....
@@ -274,6 +295,8 @@ checkExpr (Update name expr)    = do
                                       --   when (etype /= t) (throwError $ "Variable " ++ name ++ " not the same type as assigned expression.")
                                       --   return (t, stype)
 
+-- TODO the Out case will almost always be for a fresh variable that has never been declared (but is expected upon completion of typechecking a shader)
+-- We should revisit this to clean it up to reflect this expected behavior, and it may be appropriate to disallow 'outting' the same output more than once
 checkExpr (Out name expr)      = do
                                    (Comb e _ _) <- get
                                    case (lookupE name e, lookup name shaderVals) of
@@ -287,7 +310,11 @@ checkExpr (Out name expr)      = do
                                        when (etype /= svtype) (throwError $ "Variable " ++ name ++ " does not match out type.")
                                        when (any (stype /=) estype) (throwError $ "Variable " ++ name ++ " does not match out type.")
                                        return (etype, Just stype)
-                                     _ -> throwError $ "Variable " ++ name ++ " can not be set as an out."
+                                     _ -> do
+                                       -- first time this has been emitted, add it to the env, and we'll type check it when finishing the shader
+                                       (etype, stype) <- checkExpr expr
+                                       modify $ addLocal (name,(etype,True))
+                                       return (etype, stype)
 
 checkExpr (Branch c e e') = do
                               (etype, stype) <- checkExpr c
@@ -329,21 +356,32 @@ checkExpr (App n p) = do
 checkExpr (BinOp o e e') = do
                              (etype, stype) <- checkExpr e
                              (etype', stype') <- checkExpr e'
-                             when (etype /= etype') (throwError "Expression types to not match in binary operation")
-                             when (stype /= stype') (throwError "Shader types to not match in binary operation")
+                             -- type check binops, but allow a special case between mats & vects
+                             -- TODO, this is not quite correct, as it allows arbitrary binop usage between mats & vects
+                             -- in future work, we need to correctly rewrite binops as overloaded functions definitions, and type check them normally like any other function
+                             -- the type list is small enough that we can capture the acceptable set of operands w/ their operators
+                             when (etype /= etype' && not (etype `elem` [TMat4,TV4]) && not (etype' `elem` [TMat4,TV4])) (throwError $ "Expression types do not match in binary operation: " ++ show etype ++ " and " ++ show etype')
+                             when (stype /= stype') (throwError $ "Shader types do not match in binary operation: " ++ show stype ++ " and " ++ show stype')
                              let (ptype, rtype) = bopType o
                              when (not $ checkReq ptype etype) (throwError "Binary operator has incorrect parameters ")
                              case toType rtype of
                                Just t  -> return (t, stype)
-                               Nothing -> return (etype, stype)
+                               Nothing -> return (etype', stype')
         where
           checkReq (Needs t) t' = t == t'
           checkReq None _ = True
           checkReq (Nott t) t' = t /= t'
           toType (Needs t) = Just t
           toType _ = Nothing
-checkExpr (AccessN name _) = checkVariable name -- We don't check if the accesor is a member
-checkExpr (AccessI name _) = checkVariable name -- We don't check the size if we can
+checkExpr (AccessN name n) = do
+  -- verify this expr exists
+  (t,_) <- checkVariable name -- We don't check if the accesor is a member
+  when (t /= TV2 && t /= TV3 && t /= TV4) (throwError $ "Cannot access a named index of non-vector " ++ name ++ " with index " ++ n)
+  return (TF,Nothing)
+checkExpr (AccessI name i) = do
+  (t,_) <- checkVariable name -- We don't check the size if we can
+  when (t /= TV2 && t /= TV3 && t /= TV4) (throwError $ "Cannot access a named index of non-vector " ++ name ++ " with index " ++ (show i))
+  return (TF,Nothing)
 checkExpr (I _) = return (TI,Nothing)
 checkExpr (B _) = return (TB,Nothing)
 checkExpr (F _) = return (TF,Nothing)
