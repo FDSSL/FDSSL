@@ -48,7 +48,8 @@ data Type =
   TV3 |
   TV4 |
   TMat4 |
-  TArray
+  TArray |
+  TNull
   deriving (Eq, Ord)
 
 data Expr =
@@ -138,7 +139,7 @@ instance Composable Shader where
 data Prog = Prog Env Funcs Shader Shader
 
 data OpaqueType = Uniform | Attribute | Varying
-
+  deriving (Eq)
 data Opaque = Opaque {
   opaqueType :: OpaqueType,
   opaqueVType :: Type,

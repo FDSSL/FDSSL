@@ -10,7 +10,8 @@ import Syntax
 
 import Control.Monad.Except   (ExceptT,MonadError,runExceptT,throwError)
 import Control.Monad.State    (State,MonadState,get,put,modify)
-import Control.Monad          (guard, when)
+import Control.Monad          (guard, when, sequence, mapM)
+import Data.Maybe
 
 -- tyep check to make sure applications are good
 -- type check to make sure various bin ops and such are good
@@ -22,7 +23,7 @@ import Control.Monad          (guard, when)
 
 type Error = String
 
-type Locals = [(String, Type)]
+type Locals = [(String, (Type, Bool))]
 
 data AllEnvs = Comb {
   getUniforms :: Env,
@@ -47,6 +48,18 @@ shaderVals = [
   ("gl_BaseInstance", (VertShader,TI))
  ]
 
+lookupG :: Eq b => (a -> b) -> b -> [a] -> Maybe a
+lookupG f c (x:xs)
+    | c == f x = Just x
+    | otherwise = lookupG f c xs
+lookupG _ _ [] = Nothing
+
+lookupF :: String -> Funcs -> Maybe (Maybe ShaderType, Func)
+lookupF = lookupG (funcName . snd)
+
+lookupE :: String -> Env -> Maybe Opaque
+lookupE = lookupG opaqueName
+
 fnames :: Funcs -> [String]
 fnames = map (funcName . snd)
 
@@ -57,10 +70,10 @@ lnames :: Locals -> [String]
 lnames = map fst
 
 snames :: [String]
-snames = map fst shadeVals
+snames = map fst shaderVals
 
-isDefined :: AllEnvs -> String -> Bool
-isDefined (Comb e f l) s = any (elem s) [unames e, fnames f, lnames l, snames]
+isDefined :: String -> AllEnvs -> Bool
+isDefined s (Comb e f l) = any (elem s) [unames e, lnames l, snames]
 
 clearLocals :: AllEnvs -> AllEnvs
 clearLocals (Comb u f _) = Comb u f []
@@ -68,8 +81,11 @@ clearLocals (Comb u f _) = Comb u f []
 addLocals :: Locals -> AllEnvs -> AllEnvs
 addLocals ls (Comb e f l) = Comb e f (ls++l)
 
-addLocal :: (String, Type) -> AllEnvs -> AllEnvs
+addLocal :: (String, (Type,Bool)) -> AllEnvs -> AllEnvs
 addLocal l c = addLocals [l] c
+
+addFuncParams :: [(String,Type)] -> AllEnvs -> AllEnvs
+addFuncParams = addLocals . map (\(n, t) -> (n,(t,False)))
 
 repeated :: Eq a => [a] -> [a]
 repeated = go []
@@ -114,33 +130,26 @@ typeCheckProg p@(Prog e f s s')
 checkBlock :: MonadCheck m => Block -> Type -> m (Type, Maybe ShaderType)
 checkBlock (e:es) t = do
                        (etype, stype) <- checkExpr e
-                       return Nothing
-checkBody (e:[]) t = do
-                       typ <-  e
-                       when (isImm e && t /= typ) (throwError "Final expression " ++ show e ++ " does not match function return type")
+                       return (TNull, Nothing)
+checkBlock (e:[]) t = do
+                       (etype, stype) <- checkExpr e
+                       when (isImm e && t /= etype) (throwError $ "Final expression of block  does not match function return type")
+                       return (TNull, Nothing)
 
 
-checkFunc :: MonadCheck m => Func -> m (Maybe ShaderType, Func)
-checkFunc f@(Func n p t b) = do
-                                modify (addLocals p)
-                                stype <- checkBody b t
+checkFunc :: MonadCheck m => (Maybe ShaderType, Func) -> m (Maybe ShaderType, Func)
+checkFunc (_, f@(Func n p t b)) = do
+                                modify (addFuncParams p)
+                                (typ, stype) <- checkBlock b t
                                 modify clearLocals
                                 return (stype, f)
-
-
-checkFuncs :: MonadCheck m => [(Maybe ShaderType, Func)] -> m [(Maybe ShaderType, Func)]
-checkFuncs ((_, f):fs) = do
-                             pair <- checkFunc f
-                             pairs <- checkFuncs fs
-                             return (pair:pairs)
-checkFuncs []          = return []
 
 
 typeCheckFuncs :: MonadCheck m => m ()
 typeCheckFuncs = do
                    (Comb e fs l) <- get
 
-                   fs <- checkFuncs fs
+                   fs <- mapM checkFunc fs
                    put $ Comb e fs l
                    -- Then we can check behavior
                    return ()
@@ -158,26 +167,51 @@ typeCheckShader (Shader t ie oe b) = undefined
 --   Check that AccessI matches length of array
 --   Type check assignments
 
+checkAssign :: MonadCheck m => Bool -> Type -> String -> Expr -> AllEnvs -> m (Type, Maybe ShaderType)
+checkAssign mut typ name expr env = do
+                                  when (isDefined name env) (throwError $ "Variable " ++ name ++ " already defined")
+                                  (etype, stype) <- checkExpr expr
+                                  when (etype /= typ) (throwError $ "Variable " ++ name ++ " assigned to expression not matching type")
+                                  modify $ addLocal (name,(typ,mut))
+                                  return (etype, stype)
 
 checkExpr :: MonadCheck m => Expr -> m (Type, Maybe ShaderType)
-checkExpr (Mut typ name expr) = do
-                                  env <- get
-                                  when (isDefined env name) (throwError "Mutable variable " ++ name ++ " already defined")
-                                  (etype, stype) <- checkExpr expr
-                                  when (etype /= typ) (throwError "Variable " ++ name ++ " assigned to expression of type " ++ etype)
-                                  addLocal (name,typ)
-                                  return (etype, stype)
-checkExpr (Const typ name expr) = checkExpr e f l expr && typ == getType expr
-checkExpr (Update name expr) = checkExpr expr &&
-                                     case (lookup name e, lookup name l) of
+checkExpr (Mut typ name expr)   = get >>= checkAssign True typ name expr
+checkExpr (Const typ name expr) = get >>= checkAssign False typ name expr
+checkExpr (Update name expr)    = do
+                                    env@(Comb e f l) <- get
+                                    when (not $ isDefined name env) (throwError $ "Variable " ++ name ++ " not defined")
 
-checkExpr (Out String Expr) = undefined
-checkExpr (Branch c e1 e1) = undefined
-checkExpr (For Expr (Maybe String) Expr) = undefined
-checkExpr (SComment String) = undefined
-checkExpr (BComment String) = undefined
-checkExpr (Seq Expr) = undefined
-checkExpr (App String [Expr]) = undefined
-checkExpr (BinOp BOp Expr) = undefined
-checkExpr (AccessN String String) = undefined
-checkExpr (AccessI String Int) = undefined
+                                    when (lookupE name e /= Nothing) (throwError $ "Cannot assign opaque variable " ++ name)
+                                    case lookup name l of
+                                      Nothing -> throwError "Variable not found"
+                                      Just (t,m) -> do
+                                                        when (m == False) (throwError $ "Variable " ++ name ++ " cannot be modified")
+                                                        (etype, stype) <- checkExpr expr
+                                                        when (etype /= t) (throwError $ "Variable " ++ name ++ " not the same type as assigned expression.")
+                                                        return (t, stype)
+
+checkExpr (Out name expr)      = do
+                                   (Comb e f l) <- get
+                                   case lookupE name e of
+                                     Nothing -> throwError $ "Cannot push value to out variable " ++ name
+                                     Just (Opaque otype typ n) -> do
+                                                                    (etype, stype) <- checkExpr expr
+                                                                    when (otype == Uniform || otype == Attribute) (throwError $ "Cannot modify opaque variable " ++ n)
+                                                                    when (etype /= typ) (throwError $ "Variable " ++ name ++ " does not match out type.")
+                                                                    return (TNull, Nothing)
+
+
+checkExpr (Branch c e e') = undefined
+checkExpr (For c (Just n) b) = undefined
+checkExpr (For c Nothing b) = undefined
+checkExpr (SComment _) = return (TNull, Nothing)
+checkExpr (BComment _) = return (TNull, Nothing)
+checkExpr (App n p) = do
+                        (Comb e f l) <- get
+                        ps <- mapM checkExpr p
+                        return (TNull, Nothing)
+
+checkExpr (BinOp o e e') = undefined
+checkExpr (AccessN name member) = undefined
+checkExpr (AccessI name idx) = undefined
