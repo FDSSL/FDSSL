@@ -10,19 +10,23 @@ import Examples
 import Parser
 import TypeChecker
 import Data.Either
+import Window
 
 -- | Runs 5 different concrete FDSSL programs, and writes the resulting GLSL shaders to files
 main :: IO ()
 main = do
-  evalProg "examples/e0.fdssl"
-  evalProg "examples/e1.fdssl"
-  evalProg "examples/e2.fdssl"
-  evalProg "examples/e3.fdssl"
-  evalProg "examples/e4.fdssl"
-  evalProg "examples/e6.fdssl"
-  evalProg "examples/shaderCompExampleProg.fdssl"
-  putStrLn $ "\n* These example shaders will run on: https://www.uphouseworks.com/fdssl-test.html"
-  putStrLn $ "* They will also run for any OpenGL program that defines the expected uniforms\n"
+  putStrLn "* make sure to run this via 'stack run', 'stack ghci' will not work"
+  putStrLn "* preparing to render"
+  render
+  -- evalProg "examples/e0.fdssl"
+  -- evalProg "examples/e1.fdssl"
+  -- evalProg "examples/e2.fdssl"
+  -- evalProg "examples/e3.fdssl"
+  -- evalProg "examples/e4.fdssl"
+  -- evalProg "examples/e6.fdssl"
+  -- evalProg "examples/shaderCompExampleProg.fdssl"
+  -- putStrLn $ "\n* These example shaders will run on: https://www.uphouseworks.com/fdssl-test.html"
+  -- putStrLn $ "* They will also run for any OpenGL program that defines the expected uniforms\n"
 
 -- | 'Compiles' an FDSSL program into a GLSL Program (vert & frag strings) w/ a name
 -- Due to the tight coupling between FDSSL & GLSL, the pretty printer is a transpiler from FDSSL -> GLSL
