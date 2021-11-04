@@ -1,0 +1,113 @@
+focus is on producing colors & vertices
+
+
+Redefine Syntax and Semantics in advance...this will help clean things up a lot
+Syntax = BNF
+Semantics = Small Step Semantics
+
+
+-- Let's say all programs are composed of functions that fulfill stages
+program := env [shader]
+
+
+shader := name shaderType inEnv outEnv expr
+
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+
+uniform Mat4 uPM
+uniform Mat4 uMVM
+uniform Float uTime
+
+// type Frag = Color
+// type Vert = Position
+type Frag2 = Frag & (Vec3,Vec3) -- extend types, but
+
+val1 : Int = 25
+
+double : (Int x) -> Int {
+    return x * 2
+}
+
+inc : (Int x) -> Int {
+    return x + 1
+}
+
+add : (Int x, Int y) -> Int {
+    return x + y
+}
+
+v1 : (Vec3 pos) -> Vert {
+    position = uPM * uMVM * pos
+    return (pos[x],pos[y],pos[z])
+}
+
+v2 : (Vec3 avp) -> Vert {
+    return uPM * uMVM * pos
+}
+
+f1 : (Vec3 x) -> Frag {
+    Vec4 col = (0.5,0.5,0.5,1.0)
+    return col
+}
+
+f2 : (Vec3 pos) -> Frag {
+    Vec4 c = (pos[x],pos[y],pos[z],1.0)
+    return c
+}
+
+// 1 possible program to work with
+Prog p3 = (bind(v1,aVertPos),bind(f1)) -- better than mkProg, so we just bind shaders together into programs
+
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+
+
+
+program := env [shader]    -- global environment + shaders
+
+env := [func]
+
+unitName   := String                -- Fragment, Vertex... This won't be defined by the user.
+shaderEnvs := [(unitName, env)]     -- This will be written in the language, but won't be written by the user
+
+shader := unitName name expr       -- a shader contains it's functions (decl & def) and it's primary expr (corresponding to main)
+
+name := String
+
+cmpop := == | != | <= | >= | < | >
+bitop :=  & | \|  | ^
+logiop := And | Or
+arithop := + | - | * | /
+shaderComp := .
+binop := arithop | cmpop | logiop | bitop | shaderComp
+unop := FlipBits | Not
+
+vdim := 2 | 3 | 4
+floatType := Float | Double
+discreteType := Bool | Int | UInt
+baseType := floatType | discreteType
+type     := baseType | baseType[int] | Vec vdim baseType | Mat vdim vdim floatType
+
+typeDecl := name [name : type]  -- may or may not include this...
+
+func := name signature expr
+signature := type | type -> signature
+
+lit := int | bool | float | double   -- Literal value
+
+expr := lit |
+name |                      -- name of let bound name, function name, etc.
+(expr,...,expr) |           -- N-ary vector (tuple) or mat | 2 <= N <= 4
+unop expr |                 -- Unary operator application
+let name : type = expr \n expr |   -- let binding
+name(expr,...,expr)         -- prefix app
+expr binop expr             -- infix app
+name[(name | int)]          -- structure access
+//...\n                     -- single-line comment
+/*...*/                     -- block comment
+if expr then expr else expr -- branching
+for (int) do (?:|name|) (expr)         -- produces a value from evaluating expr 'int' times, e.x. let x = 1+x \n let x = 1+x \n ... let x = 1+x \n x (optional index name can be given after do
+[expr]                      -- lists, which correspond to arrays

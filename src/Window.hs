@@ -25,7 +25,7 @@ render = do
   (_progName, _args) <- getArgsAndInitialize
   initialDisplayMode    $= [WithDepthBuffer, DoubleBuffered, RGBAMode]
   initialWindowSize     $= Size 512 512
-  _window <- createWindow "Hello World"
+  _window <- createWindow "FDSSL"
   depthFunc $= Just Less -- the comparison function for depth the buffer
   angle <- newIORef 0.0
   delta <- newIORef 0.1
