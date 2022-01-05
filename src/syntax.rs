@@ -59,7 +59,10 @@ pub enum Expr {
         value: Block,
     },
     Def {
-        mutable: bool,
+        name: String,
+        value: Box<Expr>,
+    },
+    DefMut {
         name: String,
         value: Box<Expr>,
     },
