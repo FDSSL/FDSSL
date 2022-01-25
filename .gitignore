@@ -24,3 +24,8 @@ cabal.project.local~
 TODO.md
 *.frag
 *.vert
+
+
+# Added by cargo
+
+/target
