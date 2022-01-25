@@ -1,21 +1,19 @@
 mod syntax;
-use syntax::Expr::*;
-use syntax::DiscreteType::Int;
-use syntax::Block;
+use syntax::Expr::{DefMut, Vect, I};
+use syntax::Type::{Int, Array};
+
 
 fn main() {
-    let x = Def {
-        mutable: false,
-        name: "x",
+    let x = DefMut {
+        name: "x".to_string(),
         value: Box::new(
             Vect {
                 is_matrix: false,
-                datatype: Int,
-                value: Block{
-                    body: vec!{
-                        Box::new(I(1)), Box::new(I(2))
-                    }
+                datatype: Array(Box::new(Int)),
+                value: vec!{
+                    Box::new(I(1)), Box::new(I(2))
                 }
             }
-        );
+        ),
+    };
 }

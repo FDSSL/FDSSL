@@ -1,20 +1,13 @@
-pub enum DiscreteType {
+pub enum Type {
+    Uint,
     Int,
     Bool,
     Float,
-}
-
-pub enum Type {
-    Vector(usize, DiscreteType),
+    Double,
+    Array(Box<Type>),
+    Struct(String),
     Function,
-    Shader,
-}
-
-pub enum ShaderType {
-    Vector,
-    Fragment,
-    Tesselation,
-    // And more!
+    Opaque(String),
 }
 
 pub enum BOp {
@@ -25,6 +18,7 @@ pub enum BOp {
     Mod,
     And,
     Or,
+    Compose,
     Eq,
     Neq,
     Gt,
@@ -36,9 +30,6 @@ pub enum BOp {
     BitXor,
 }
 
-pub struct Block {
-    pub body: Vec<Box<Expr>>
-}
 pub struct Parameter {
     name: String,
     datatype: Type
@@ -53,10 +44,13 @@ pub enum Expr {
     I(usize),
     B(bool),
     F(f32),
+    D(f64),
+    Ref(String),
+    Return(Box<Expr>),
     Vect {
         is_matrix: bool,
-        datatype: DiscreteType,
-        value: Block,
+        datatype: Type,
+        value: Vec<Box<Expr>>,
     },
     Def {
         name: String,
@@ -66,43 +60,35 @@ pub enum Expr {
         name: String,
         value: Box<Expr>,
     },
-    Ref(String),
     App {
         fname: String,
-        arguments: Block,
+        arguments: Vec<Box<Expr>>,
     },
     BinOp {
         operator: BOp,
         e1: Box<Expr>,
         e2: Box<Expr>,
     },
-    Compose(String, String),
-    Update{
+    Update {
         target: String,
         value: Box<Expr>,
     },
     Branch {
         condition: Box<Expr>,
-        b1: Block,
-        b2: Block,
+        b1: Vec<Box<Expr>>,
+        b2: Vec<Box<Expr>>,
     },
     For {
         condition: Box<Expr>,
         variable: Option<String>,
-        body: Block,
+        body: Vec<Box<Expr>>,
     },
     Access(String, AccessType),
     Comment(Vec<String>),
     Func {
         name: String,
         parameters: Vec<Parameter>,
-        return_type: Type,
-        body: Block,
-    },
-    Shader {
-        name: String,
-        parameters: Vec<Parameter>,
         return_type: Vec<Parameter>,
-        body: Block,
-    }
+        body: Vec<Box<Expr>>,
+    },
 }
