@@ -6,7 +6,10 @@ use syntax::Type::{Int, Array};
 use parser::program;
 
 fn main() {
-    let res = match program("laksjd (a: tru, b: a) -> (a, b) { }") {
+    let prog = "\
+    laksjd (a: tru, b: a) -> (a, b) { \
+    kjsd {{{{}{pd{kdfj}kjd} }}}} {} {}";
+    let res = match program(prog) {
         Ok((_, a)) => a,
         _          => "Error: Not a function",
     };
