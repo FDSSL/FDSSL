@@ -3,20 +3,20 @@ use crate::syntax;
 use syntax::Expr;
 
 extern crate nom;
-use nom::bytes::complete::{is_a, is_not, tag, take_until};
-use nom::character::complete::{alpha1, digit1, i32, multispace0, one_of, space0, space1};
+
+use nom::bytes::complete::{is_not, tag};
+
+use nom::character::complete::{char, alpha1, i32, multispace0, space0, space1, not_line_ending};
+
+use nom::{Needed};
 use nom::{IResult};
-use nom::Err::Error;
-use nom::Err;
 
 use nom::branch::alt;
-use nom::multi::{fold_many1, many0, many1, separated_list0};
-use nom::sequence::{delimited, separated_pair, terminated, tuple};
-use nom::{Needed};
+use nom::multi::{many1, separated_list0};
 
-use nom::combinator::map;
-use nom::combinator::verify;
-use nom::sequence::preceded;
+use nom::sequence::{preceded, delimited, separated_pair};
+
+use nom::combinator::{map, verify};
 
 // pub struct Program {
 //     main: Expr,
@@ -42,6 +42,36 @@ fn parse_int(input: &str) -> IResult<&str, Expr> {
 fn parse_bool(input: &str) -> IResult<&str, Expr> {
     let vp1 = verify(preceded(space0, name), |s: &str| s == "true" || s == "false");
     return map(vp1, |s: &str| if s == "true" { Expr::B(true) } else { Expr::B(false) })(input);
+}
+
+/// Parses a comment, which is a valid element in our abstract syntax
+/// Comments are transformed from FDSSL to match the equivalent GLSL produced
+fn parse_comment(input: &str) -> IResult<&str, Expr> {
+    // match a '//' up to the end of the line
+    // then, take a comment all the way to the end, ignoring the opener
+    let comment = preceded(preceded(space0, tag("//")), not_line_ending);
+    // map what we found into a valid comment
+    return map(comment, |s: &str| Expr::Comment(vec![s.into()]) )(input);
+}
+
+/// Parses a parenthetically nested expression
+fn parse_nested_expr(input: &str) -> IResult<&str, Expr> {
+    return delimited(
+        preceded(space0, char('(')),
+        parse_expr,
+        preceded(space0, char(')')),
+    )(input);
+}
+
+/// Parses a standalone expression
+/// Represents all possible expansions for parsing exprs
+fn parse_expr(input: &str) -> IResult<&str, Expr> {
+    return alt((
+        parse_int,
+        parse_bool,
+        parse_comment,
+        parse_nested_expr
+    ))(input);
 }
 
 pub fn program(i: &str) -> IResult<&str, &str> {
@@ -178,19 +208,6 @@ fn test_parse_bools() {
     assert_eq!(verify_parse(parse_bool("astrues")), false, "Failed to reject bad 'true' value w/ leading text");
 }
 
-/// Tests parsing various comments
-#[test]
-fn test_parse_comments() {
-    assert_eq!(parse_bool("true"), Ok(("", Expr::B(true))), "Failed to parse 'true'");
-    assert_eq!(parse_bool("false"), Ok(("", Expr::B(false))), "Failed to parse 'false'");
-    assert_eq!(parse_bool("  true  "), Ok(("  ", Expr::B(true))), "Failed to parse 'true' w/ spaces");
-    assert_eq!(parse_bool(" false "), Ok((" ", Expr::B(false))), "Failed to parse 'false' w/ spaces");
-
-    assert_eq!(verify_parse(parse_bool("trues")), false, "Failed to reject bad 'true' value");
-    assert_eq!(verify_parse(parse_bool("False")), false, "Failed to reject bad 'false' value");
-    assert_eq!(verify_parse(parse_bool("astrues")), false, "Failed to reject bad 'true' value w/ leading text");
-}
-
 /// Tests parsing various floats
 #[test]
 fn test_parse_floats() {
@@ -215,9 +232,24 @@ fn test_parse_refs() {
 /// Tests parsing a comment
 #[test]
 fn test_parse_comment() {
-    // TODO .....
-    assert!(false, "Comment parsing tests not implemented yet!");
+    assert_eq!(parse_comment("//"), Ok(("", Expr::Comment(vec!["".into()]))), "Failed to parse empty comment");
+    assert_eq!(parse_comment("// this is a comment"), Ok(("", Expr::Comment(vec![" this is a comment".into()]))), "Failed to parse regular comment");
+    assert_eq!(parse_comment(" // ok"), Ok(("", Expr::Comment(vec![" ok".into()]))), "Failed to parse comment w/ leading space");
+    assert_eq!(verify_parse(parse_comment("f // ok")), false, "Failed to reject a non-comment");
+    assert_eq!(parse_comment(" // ok\nand more"), Ok(("\nand more", Expr::Comment(vec![" ok".into()]))), "Didn't stop parsing comment at \n");
 }
+
+
+/// Tests parsing a nested expr w/ parens
+#[test]
+fn test_parse_nested_expr() {
+    assert_eq!(parse_nested_expr("(1)"), Ok(("", Expr::I(1))), "Failed to parse a nested int");
+    assert_eq!(parse_nested_expr(" ( true ) "), Ok((" ", Expr::B(true))), "Failed to parse a nested boolean");
+    assert_eq!(parse_nested_expr(" (( ((-5) ))) "), Ok((" ", Expr::I(-5))), "Failed to parse a deeply nested int");
+    assert_eq!(verify_parse(parse_nested_expr(" (( ((-5) )) ")), false, "Failed to reject a badly nested expr!");
+    assert_eq!(verify_parse(parse_nested_expr("()")), false, "Failed to reject empty parens w/ no expr");
+}
+
 
 /// Tests parsing a type annotation (a name)
 #[test]

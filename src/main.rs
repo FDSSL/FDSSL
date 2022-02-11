@@ -1,8 +1,6 @@
 mod syntax;
 mod parser;
 
-use syntax::Expr::{DefMut, Vect, I};
-use syntax::Type::{Int, Array};
 use parser::program;
 
 fn main() {
