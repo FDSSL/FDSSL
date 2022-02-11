@@ -1,31 +1,47 @@
-//use syntax::Expr;
-//mod syntax;
+use crate::syntax;
+
+use syntax::Expr;
+
 extern crate nom;
 use nom::bytes::complete::{is_a, is_not, tag, take_until};
 use nom::character::complete::{alpha1, digit1, i32, multispace0, one_of, space0, space1};
-use nom::{IResult, Parser};
+use nom::{IResult};
+use nom::Err::Error;
+use nom::Err;
 
 use nom::branch::alt;
-use nom::error;
 use nom::multi::{fold_many1, many0, many1, separated_list0};
 use nom::sequence::{delimited, separated_pair, terminated, tuple};
-use nom::{Err, Needed};
+use nom::{Needed};
+
+use nom::combinator::map;
+use nom::combinator::verify;
+use nom::sequence::preceded;
+
 // pub struct Program {
 //     main: Expr,
 //     functions: Vec<Expr>
 // }
 
-macro_rules! name {
-    () => {
-        alpha1
-    };
+/// Parses any valid identifier
+fn name(i: &str) -> IResult<&str, &str> {
+    alpha1(i)
+  // match alpha1::<&str, ParseError>(i) {
+  //     Ok(t) => return Ok(t),
+  //     _     => return Err(Error(ParseError::Basic))
+  // }
 }
 
 /// Parses an int, corresponding to a 32-bit int in Rust.
 /// Can be surrounded by spaces on either end
-fn parseInt(input: &str) -> IResult<&str, i32> {
-    let (i, _) = space0(input)?;
-    return i32(i);
+fn parse_int(input: &str) -> IResult<&str, Expr> {
+    map(preceded(space0, i32), |i: i32| Expr::I(i))(input)
+}
+
+/// Parses a Boolean value w/ optional leading space
+fn parse_bool(input: &str) -> IResult<&str, Expr> {
+    let vp1 = verify(preceded(space0, name), |s: &str| s == "true" || s == "false");
+    return map(vp1, |s: &str| if s == "true" { Expr::B(true) } else { Expr::B(false) })(input);
 }
 
 pub fn program(i: &str) -> IResult<&str, &str> {
@@ -33,7 +49,7 @@ pub fn program(i: &str) -> IResult<&str, &str> {
 }
 
 fn function(input: &str) -> IResult<&str, &str> {
-    let (input, id) = name!()(input)?;
+    let (input, id) = name(input)?;
 
     let (input, _) = space1(input)?;
 
@@ -45,7 +61,7 @@ fn function(input: &str) -> IResult<&str, &str> {
 
     let (input, rets) = parens(input)?;
 
-    let (_, rets) = separated_list0(tag(", "), name!())(rets)?;
+    let (_, rets) = separated_list0(tag(", "), name)(rets)?;
 
     let (input, _) = multispace0(input)?;
 
@@ -116,8 +132,7 @@ fn parens(input: &str) -> IResult<&str, &str> {
 }
 
 fn parameters(input: &str) -> IResult<&str, Vec<(&str, &str)>> {
-    let param = separated_pair(name!(), tag(": "), name!());
-
+    let param = separated_pair(name, tag(": "), name);
     separated_list0(tag(", "), param)(input)
 }
 
@@ -128,21 +143,52 @@ TESTS
 /// Tests parsing various ints
 #[test]
 fn test_parse_ints() {
-    assert_eq!(parseInt("32"), Ok(("", 32)), "Failed to parse 32");
-    assert_eq!(parseInt("0"), Ok(("", 0)), "Failed to parse 0");
-    assert_eq!(parseInt("  1"), Ok(("", 1)), "Failed to parse 1 w/ a space");
+    assert_eq!(parse_int("32"), Ok(("", Expr::I(32))), "Failed to parse 32");
+    assert_eq!(parse_int("0"), Ok(("", Expr::I(0))), "Failed to parse 0");
     assert_eq!(
-        parseInt(" -51  "),
-        Ok(("  ", -51)),
+        parse_int("  1"),
+        Ok(("", Expr::I(1))),
+        "Failed to parse 1 w/ a space"
+    );
+    assert_eq!(
+        parse_int(" -51  "),
+        Ok(("  ", Expr::I(-51))),
         "Failed to parse a negative int w/ spaces"
     );
+}
+
+/// Used for testing, returns whether a parse failed
+fn verify_parse(p: IResult<&str, Expr>) -> bool {
+    match p {
+        Ok(_)   => return true, // valid parse
+        Err(_)  => return false // errored out
+    };
 }
 
 /// Tests parsing various bools
 #[test]
 fn test_parse_bools() {
-    // TODO .....
-    assert!(false, "Bool tests not implemented yet!");
+    assert_eq!(parse_bool("true"), Ok(("", Expr::B(true))), "Failed to parse 'true'");
+    assert_eq!(parse_bool("false"), Ok(("", Expr::B(false))), "Failed to parse 'false'");
+    assert_eq!(parse_bool("  true  "), Ok(("  ", Expr::B(true))), "Failed to parse 'true' w/ spaces");
+    assert_eq!(parse_bool(" false "), Ok((" ", Expr::B(false))), "Failed to parse 'false' w/ spaces");
+
+    assert_eq!(verify_parse(parse_bool("trues")), false, "Failed to reject bad 'true' value");
+    assert_eq!(verify_parse(parse_bool("False")), false, "Failed to reject bad 'false' value");
+    assert_eq!(verify_parse(parse_bool("astrues")), false, "Failed to reject bad 'true' value w/ leading text");
+}
+
+/// Tests parsing various comments
+#[test]
+fn test_parse_comments() {
+    assert_eq!(parse_bool("true"), Ok(("", Expr::B(true))), "Failed to parse 'true'");
+    assert_eq!(parse_bool("false"), Ok(("", Expr::B(false))), "Failed to parse 'false'");
+    assert_eq!(parse_bool("  true  "), Ok(("  ", Expr::B(true))), "Failed to parse 'true' w/ spaces");
+    assert_eq!(parse_bool(" false "), Ok((" ", Expr::B(false))), "Failed to parse 'false' w/ spaces");
+
+    assert_eq!(verify_parse(parse_bool("trues")), false, "Failed to reject bad 'true' value");
+    assert_eq!(verify_parse(parse_bool("False")), false, "Failed to reject bad 'false' value");
+    assert_eq!(verify_parse(parse_bool("astrues")), false, "Failed to reject bad 'true' value w/ leading text");
 }
 
 /// Tests parsing various floats

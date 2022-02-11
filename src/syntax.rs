@@ -1,3 +1,5 @@
+
+#[derive(Debug,PartialEq)]
 pub enum Type {
     Uint,
     Int,
@@ -10,6 +12,7 @@ pub enum Type {
     Opaque(String),
 }
 
+#[derive(Debug,PartialEq)]
 pub enum BOp {
     Add,
     Sub,
@@ -30,18 +33,21 @@ pub enum BOp {
     BitXor,
 }
 
+#[derive(Debug,PartialEq)]
 pub struct Parameter {
     name: String,
-    datatype: Type
+    datatype: Type,
 }
 
+#[derive(Debug,PartialEq)]
 pub enum AccessType {
     Name(String),
     Idx(usize),
 }
 
+#[derive(Debug,PartialEq)]
 pub enum Expr {
-    I(usize),
+    I(i32),
     B(bool),
     F(f32),
     D(f64),
