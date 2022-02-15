@@ -190,9 +190,9 @@ fn test_parse_ints() {
 /// Used for testing, returns whether a parse failed
 fn verify_parse(p: IResult<&str, Expr>) -> bool {
     match p {
-        Ok(_)   => return true, // valid parse
-        Err(_)  => return false // errored out
-    };
+        Ok(_)   => true, // valid parse
+        Err(_)  => false // errored out
+    }
 }
 
 /// Tests parsing various bools
