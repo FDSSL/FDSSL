@@ -1,4 +1,3 @@
-
 #[derive(Debug,PartialEq)]
 pub enum Type {
     Uint,
@@ -6,9 +5,9 @@ pub enum Type {
     Bool,
     Float,
     Double,
-    Array(Box<Type>),
+    Tuple(Box<Type>, Box<Type>),
     Struct(String),
-    Function,
+    Function(Box<Type>, Box<Type>),
     Opaque(String),
 }
 
@@ -61,6 +60,7 @@ pub enum Expr {
     Def {
         name: String,
         value: Box<Expr>,
+
     },
     DefMut {
         name: String,

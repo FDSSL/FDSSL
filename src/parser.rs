@@ -1,27 +1,30 @@
 use crate::syntax;
 
 use syntax::Expr;
-
+use syntax::Type;
 extern crate nom;
+
 
 use nom::bytes::complete::{is_not, tag};
 
-use nom::character::complete::{char, alpha1, i32, multispace0, space0, space1, not_line_ending};
+use nom::character::complete::{char, alpha1, i32, multispace0, space0, space1, not_line_ending, line_ending};
 
 use nom::{Needed};
 use nom::{IResult};
 
 use nom::branch::alt;
-use nom::multi::{many1, separated_list0};
+use nom::multi::{many1, separated_list0, separated_list1};
 
-use nom::sequence::{preceded, delimited, separated_pair};
+use nom::sequence::{preceded, delimited, terminated, separated_pair, tuple};
+use nom::number::complete::{float, double};
+use nom::combinator::{map, verify, opt};
 
-use nom::combinator::{map, verify};
 
 // pub struct Program {
 //     main: Expr,
 //     functions: Vec<Expr>
 // }
+
 
 /// Parses any valid identifier
 fn name(i: &str) -> IResult<&str, &str> {
@@ -30,49 +33,126 @@ fn name(i: &str) -> IResult<&str, &str> {
   //     Ok(t) => return Ok(t),
   //     _     => return Err(Error(ParseError::Basic))
   // }
+
 }
 
 /// Parses an int, corresponding to a 32-bit int in Rust.
 /// Can be surrounded by spaces on either end
+
 fn parse_int(input: &str) -> IResult<&str, Expr> {
     map(preceded(space0, i32), |i: i32| Expr::I(i))(input)
 }
 
-/// Parses a Boolean value w/ optional leading space
-fn parse_bool(input: &str) -> IResult<&str, Expr> {
-    let vp1 = verify(preceded(space0, name), |s: &str| s == "true" || s == "false");
-    return map(vp1, |s: &str| if s == "true" { Expr::B(true) } else { Expr::B(false) })(input);
+// we need to be careful in the type checker to prevent
+// numbers parsed as doubles being assigned to floats
+// and vice versa
+fn parse_float(i: &str) -> IResult<&str, Expr> {
+    map(preceded(space0, float), |v: f32| Expr::F(v))(i)
 }
 
-/// Parses a comment, which is a valid element in our abstract syntax
-/// Comments are transformed from FDSSL to match the equivalent GLSL produced
+fn parse_double(i: &str) -> IResult<&str, Expr> {
+    map(preceded(space0, double), |v: f64| Expr::D(v))(i)
+}
+
+fn parse_ref(i: &str) -> IResult<&str, Expr> {
+    map(preceded(space0, name), |v: &str| Expr::Ref(v.to_string()))(i)
+}
+
+// Parses a Boolean value w/ optional leading space
+fn parse_bool(input: &str) -> IResult<&str, Expr> {
+    let vp1 = verify(preceded(space0, name), |s: &str| s == "true" || s == "false");
+    map(vp1, |s: &str| if s == "true" { Expr::B(true) } else { Expr::B(false) })(input)
+}
+
+// TODO Should we check for nested returns here?
+// This almost makes me want to remove `return` again
+fn parse_return(i: &str) -> IResult<&str, Expr> {
+    map(
+        preceded(
+            delimited(space0, tag("return"), space1),
+            parse_expr,
+        ),
+        |expr: Expr| Expr::Return(Box::new(expr))
+    )(i)
+}
+
+#[derive(Debug, PartialEq)]
+enum ParsedType {
+    BaseType(String),
+    Tuple(Vec<Box<ParsedType>>),
+    Function(Box<ParsedType>, Box<ParsedType>),
+}
+
+fn parse_type_function(i: &str) -> IResult<&str, ParsedType> {
+    map(
+        tuple((
+            parse_type,
+            delimited(space1, tag("->"), space1),
+            parse_type,
+        )),
+        |(t1, _, t2): (ParsedType, &str, ParsedType)| {ParsedType::Function(Box::new(t1), Box::new(t2))}
+    )(i)
+}
+
+fn parse_type_tuple(i: &str) -> IResult<&str, ParsedType> {
+    map(
+        delimited(
+            terminated(tag("("), space0),
+            separated_list1(
+                terminated(tag(","), space0),
+                parse_type
+            ),
+            preceded(space0, tag(")")),
+        ),
+        |e: Vec<ParsedType>| ParsedType::Tuple(e.into_iter().map(|e| Box::new(e)).collect())
+    )(i)
+}
+
+fn parse_type_base(i: &str) -> IResult<&str, ParsedType> {
+    map(name, |n: &str| ParsedType::BaseType(n.to_string()))(i)
+}
+
+// To prevent too deep of recursion, perhaps we could track recursion depth
+// by implementing this as a struct object with a depth counter.
+fn parse_type(i: &str) -> IResult<&str, ParsedType> {
+    let (i, _) = space0(i)?;
+    alt((
+        parse_type_tuple,
+        parse_type_function,
+        parse_type_base
+
+    ))(i)
+}
+// Parses a comment, which is a valid element in our abstract syntax
+// Comments are transformed from FDSSL to match the equivalent GLSL produced
 fn parse_comment(input: &str) -> IResult<&str, Expr> {
     // match a '//' up to the end of the line
     // then, take a comment all the way to the end, ignoring the opener
     let comment = preceded(preceded(space0, tag("//")), not_line_ending);
     // map what we found into a valid comment
-    return map(comment, |s: &str| Expr::Comment(vec![s.into()]) )(input);
+    map(comment, |s: &str| Expr::Comment(vec![s.into()]) )(input)
 }
 
 /// Parses a parenthetically nested expression
 fn parse_nested_expr(input: &str) -> IResult<&str, Expr> {
-    return delimited(
+    delimited(
         preceded(space0, char('(')),
         parse_expr,
         preceded(space0, char(')')),
-    )(input);
+    )(input)
 }
 
 /// Parses a standalone expression
 /// Represents all possible expansions for parsing exprs
 fn parse_expr(input: &str) -> IResult<&str, Expr> {
-    return alt((
+    alt((
         parse_int,
         parse_bool,
         parse_comment,
         parse_nested_expr
-    ))(input);
+    ))(input)
 }
+
 
 pub fn program(i: &str) -> IResult<&str, &str> {
     function(i)
@@ -163,6 +243,7 @@ fn parens(input: &str) -> IResult<&str, &str> {
 
 fn parameters(input: &str) -> IResult<&str, Vec<(&str, &str)>> {
     let param = separated_pair(name, tag(": "), name);
+
     separated_list0(tag(", "), param)(input)
 }
 
@@ -211,8 +292,10 @@ fn test_parse_bools() {
 /// Tests parsing various floats
 #[test]
 fn test_parse_floats() {
-    // TODO .....
-    assert!(false, "Float tests not implemented yet!");
+    assert_eq!(parse_float("12.23"), Ok(("", Expr::F(12.23))), "Failed to parse 12.23");
+    assert_eq!(parse_float("  0.98"), Ok(("", Expr::F(0.98))), "Failed to parse 0.98");
+    assert_eq!(parse_float(" -5.2  "), Ok(("  ", Expr::F(-5.2))), "Failed to parse -5.2");
+    assert_eq!(parse_float(" 12").is_ok(), false, "Float parser failed. Parsed an integer, 12");
 }
 
 /// Tests parsing various doubles
@@ -279,9 +362,10 @@ fn test_parse_vect() {
 /// Tests parsing a return statement
 #[test]
 fn test_parse_return() {
-    // TODO .....
-    // return <expr>, needs to use parseExpr with name 'return'
-    assert!(false, "Return keyword tests not implemented yet!");
+    assert_eq!(parse_return("return true"), Ok(("", Expr::Return(Box::new(Expr::B(true))))), "Failed to parse 'return true");
+    assert_eq!(parse_return("return 1"), Ok(("", Expr::Return(Box::new(Expr::I(1))))), "Failed to parse 'return 1");
+    assert_eq!(parse_return("return (1)"), Ok(("", Expr::Return(Box::new(Expr::I(1))))), "Failed to parse 'return true");
+    assert_eq!(parse_return("returnsdf").is_ok(), false, "Failed to reject 'returnsdf'");
 }
 
 /// Tests parsing an immutable def
@@ -291,6 +375,41 @@ fn test_parse_def() {
     assert!(false, "Immutable Def tests not implemented yet!");
 }
 
+#[test]
+fn test_parse_type_function() {
+    assert_eq!(parse_type_function("int -> int"),
+               Ok(("",
+                   ParsedType::Function(
+                       Box::new(ParsedType::BaseType("int".to_string())),
+                       Box::new(ParsedType::BaseType("int".to_string())),
+                   ))
+               ),
+               "Failed to parse function type.");
+}
+
+#[test]
+fn test_parse_type_base() {
+    assert_eq!(parse_type_base("int"), Ok(("", ParsedType::BaseType("int".to_string()))), "Failed to parse base type.");
+}
+
+#[test]
+fn test_parse_type_tuple() {
+    assert_eq!(parse_type_tuple("(int, int)"),
+               Ok(("",
+                   ParsedType::Tuple(
+                       vec![
+                           Box::new(ParsedType::BaseType("int".to_string())),
+                           Box::new(ParsedType::BaseType("int".to_string())),
+                       ])
+               )),
+               "Failed to parse tuple type"
+    );
+}
+
+#[test]
+fn test_parse_type() {
+    assert!(false, "Complex type test not implemented");
+}
 /// Tests parsing a mutable def
 #[test]
 fn test_parse_defmut() {
