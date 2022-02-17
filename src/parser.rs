@@ -79,18 +79,18 @@ fn parse_return(i: &str) -> IResult<&str, Expr> {
 #[derive(Debug, PartialEq)]
 enum ParsedType {
     BaseType(String),
-    Tuple(Vec<Box<ParsedType>>),
+    Tuple(Box<ParsedType>, Box<ParsedType>),
     Function(Box<ParsedType>, Box<ParsedType>),
 }
 
 fn parse_type_function(i: &str) -> IResult<&str, ParsedType> {
     map(
         tuple((
-            parse_type,
+            alt((parse_type_base, parse_type_tuple)),
             delimited(space1, tag("->"), space1),
             parse_type,
         )),
-        |(t1, _, t2): (ParsedType, &str, ParsedType)| {ParsedType::Function(Box::new(t1), Box::new(t2))}
+        |(t1, _, t2): (ParsedType, &str, ParsedType)| ParsedType::Function(Box::new(t1), Box::new(t2))
     )(i)
 }
 
@@ -98,13 +98,28 @@ fn parse_type_tuple(i: &str) -> IResult<&str, ParsedType> {
     map(
         delimited(
             terminated(tag("("), space0),
-            separated_list1(
-                terminated(tag(","), space0),
-                parse_type
-            ),
+            // The reason these are separated is that the alt parser
+            // will try to parse "base, type" first. If that fails,
+            // then "function, type". If we try to put the alternate
+            // in the left side of the tuple, then the base type parser
+            // will consume the first part of the function type and fail
+            // on the " -> ". This was not tested and was based on my
+            // understanding of the parser type.
+            alt((
+                separated_pair(
+                    parse_type_base,
+                    delimited(space0, tag(","), space0),
+                    parse_type,
+                ),
+                separated_pair(
+                    parse_type_function,
+                    delimited(space0, tag(","), space0),
+                    parse_type,
+                ),
+            )),
             preceded(space0, tag(")")),
         ),
-        |e: Vec<ParsedType>| ParsedType::Tuple(e.into_iter().map(|e| Box::new(e)).collect())
+        |(t1, t2): (ParsedType, ParsedType)| ParsedType::Tuple(Box::new(t1), Box::new(t2))
     )(i)
 }
 
@@ -120,7 +135,6 @@ fn parse_type(i: &str) -> IResult<&str, ParsedType> {
         parse_type_tuple,
         parse_type_function,
         parse_type_base
-
     ))(i)
 }
 // Parses a comment, which is a valid element in our abstract syntax
@@ -376,6 +390,11 @@ fn test_parse_def() {
 }
 
 #[test]
+fn test_parse_type_base() {
+    assert_eq!(parse_type_base("int"), Ok(("", ParsedType::BaseType("int".to_string()))), "Failed to parse base type.");
+}
+
+#[test]
 fn test_parse_type_function() {
     assert_eq!(parse_type_function("int -> int"),
                Ok(("",
@@ -387,20 +406,16 @@ fn test_parse_type_function() {
                "Failed to parse function type.");
 }
 
-#[test]
-fn test_parse_type_base() {
-    assert_eq!(parse_type_base("int"), Ok(("", ParsedType::BaseType("int".to_string()))), "Failed to parse base type.");
-}
 
 #[test]
 fn test_parse_type_tuple() {
     assert_eq!(parse_type_tuple("(int, int)"),
                Ok(("",
                    ParsedType::Tuple(
-                       vec![
-                           Box::new(ParsedType::BaseType("int".to_string())),
-                           Box::new(ParsedType::BaseType("int".to_string())),
-                       ])
+                       Box::new(ParsedType::BaseType("int".to_string())),
+                       Box::new(ParsedType::BaseType("int".to_string())),
+                    )
+
                )),
                "Failed to parse tuple type"
     );
