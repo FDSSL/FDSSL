@@ -7,17 +7,17 @@ extern crate nom;
 
 use nom::bytes::complete::{is_not, tag};
 
-use nom::character::complete::{char, alpha1, i32, multispace0, space0, space1, not_line_ending, line_ending};
+use nom::character::complete::{char, alpha1, alphanumeric1, i32, multispace0, space0, space1, not_line_ending, line_ending};
 
 use nom::{Needed};
 use nom::{IResult};
 
 use nom::branch::alt;
-use nom::multi::{many1, separated_list0, separated_list1};
+use nom::multi::{many0, many1, separated_list0, separated_list1};
 
-use nom::sequence::{preceded, delimited, terminated, separated_pair, tuple};
+use nom::sequence::{preceded, delimited, terminated, separated_pair, tuple, pair};
 use nom::number::complete::{float, double};
-use nom::combinator::{map, verify, opt};
+use nom::combinator::{map, verify, opt, recognize};
 
 
 // pub struct Program {
@@ -26,14 +26,16 @@ use nom::combinator::{map, verify, opt};
 // }
 
 
-/// Parses any valid identifier
+/// name parses any valid identifier, [_a-zA-Z][_a-zA-Z0-9]*
+///
+/// This function was /really/ based off the example from the nom documentation
 fn name(i: &str) -> IResult<&str, &str> {
-    alpha1(i)
-  // match alpha1::<&str, ParseError>(i) {
-  //     Ok(t) => return Ok(t),
-  //     _     => return Err(Error(ParseError::Basic))
-  // }
-
+    recognize(
+        pair(
+            alt((alpha1, tag("_"))),
+            many0(alt((alphanumeric1, tag("_"))))
+        )
+    )(i)
 }
 
 /// Parses an int, corresponding to a 32-bit int in Rust.
@@ -46,14 +48,17 @@ fn parse_int(input: &str) -> IResult<&str, Expr> {
 // we need to be careful in the type checker to prevent
 // numbers parsed as doubles being assigned to floats
 // and vice versa
+/// parse_float parses a 32-bit floating point value, preceded by 0+ spaces.
 fn parse_float(i: &str) -> IResult<&str, Expr> {
     map(preceded(space0, float), |v: f32| Expr::F(v))(i)
 }
 
+/// parse_double parses a 64-bit floating point value, preceded by 0+ spaces.
 fn parse_double(i: &str) -> IResult<&str, Expr> {
     map(preceded(space0, double), |v: f64| Expr::D(v))(i)
 }
 
+/// parse_ref parses a reference, which is defined by the `name` parser, see `name`
 fn parse_ref(i: &str) -> IResult<&str, Expr> {
     map(preceded(space0, name), |v: &str| Expr::Ref(v.to_string()))(i)
 }
@@ -61,9 +66,12 @@ fn parse_ref(i: &str) -> IResult<&str, Expr> {
 // Parses a Boolean value w/ optional leading space
 fn parse_bool(input: &str) -> IResult<&str, Expr> {
     let vp1 = verify(preceded(space0, name), |s: &str| s == "true" || s == "false");
-    map(vp1, |s: &str| if s == "true" { Expr::B(true) } else { Expr::B(false) })(input)
+    map(vp1, |s: &str| Expr::B(s == "true"))(input)
 }
 
+/// parse_return parses a return expression.
+///
+/// The return expression takes an expression as an argument in the form `return expr`
 // TODO Should we check for nested returns here?
 // This almost makes me want to remove `return` again
 fn parse_return(i: &str) -> IResult<&str, Expr> {
@@ -76,6 +84,11 @@ fn parse_return(i: &str) -> IResult<&str, Expr> {
     )(i)
 }
 
+/// ParsedType is a structural type enum used during parsing.
+///
+/// This enum is not meant to be used outside the parser and type checker
+/// as it simply denotes the structure of the type rather than any type
+/// space the type occupies.
 #[derive(Debug, PartialEq)]
 enum ParsedType {
     BaseType(String),
@@ -83,6 +96,11 @@ enum ParsedType {
     Function(Box<ParsedType>, Box<ParsedType>),
 }
 
+/// parse_type_function parses the Function Type annotation.
+///
+/// This function parses type annotations of the form type -> type where `type`
+/// is any type annotation. This allows the type annotation to nest other
+/// structural types. e.g. t1 -> `t1 -> (t2, t2)`
 fn parse_type_function(i: &str) -> IResult<&str, ParsedType> {
     map(
         tuple((
@@ -94,6 +112,11 @@ fn parse_type_function(i: &str) -> IResult<&str, ParsedType> {
     )(i)
 }
 
+/// parse_type_function parses the Tuple Type annotation.
+///
+/// This function parses type annotations of the form (type, type+) where `type`
+/// is any type annotation. This allows the type annotation to nest other
+/// structural types. e.g. (t1, (t2, t3), t1 -> t2)
 fn parse_type_tuple(i: &str) -> IResult<&str, ParsedType> {
     let mut parser =
         verify(
@@ -115,12 +138,23 @@ fn parse_type_tuple(i: &str) -> IResult<&str, ParsedType> {
     )(i)
 }
 
+/// parse_type_base parses the Basic Type annotation.
+///
+/// This function parses the Basic Type annotation. This covers types including
+/// `int`, `bool`, `float`, etc. These type annotations cannot be deconstructed,
+/// so we simply save it.
+// TODO perhaps type names should be more limited than reference names
 fn parse_type_base(i: &str) -> IResult<&str, ParsedType> {
     map(name, |n: &str| ParsedType::BaseType(n.to_string()))(i)
 }
 
-// To prevent too deep of recursion, perhaps we could track recursion depth
-// by implementing this as a struct object with a depth counter.
+/// parse_type is the root of the Type annotation parser.
+///
+/// This function parses type annotations for variable declarations. The type
+/// annotations are segregated by structure, for the basic types like `int`, to
+/// function types like `int -> int`, and the tuple type like `(int, bool)`.
+/// This does not parse the `mut` keyword, as that denotes an attribute of the
+/// variable rather than the type of the value it represents.
 fn parse_type(i: &str) -> IResult<&str, ParsedType> {
     let (i, _) = space0(i)?;
     alt((
