@@ -79,7 +79,7 @@ fn parse_return(i: &str) -> IResult<&str, Expr> {
 #[derive(Debug, PartialEq)]
 enum ParsedType {
     BaseType(String),
-    Tuple(Box<ParsedType>, Box<ParsedType>),
+    Tuple(Vec<Box<ParsedType>>),
     Function(Box<ParsedType>, Box<ParsedType>),
 }
 
@@ -95,31 +95,23 @@ fn parse_type_function(i: &str) -> IResult<&str, ParsedType> {
 }
 
 fn parse_type_tuple(i: &str) -> IResult<&str, ParsedType> {
+    let mut parser =
+        verify(
+            delimited(
+                terminated(tag("("), space0),
+                separated_list1(
+                    delimited(space0, tag(","), space0),
+                    parse_type,
+                ),
+                preceded(space0, tag(")")),
+            ),
+            |elts: &Vec<ParsedType>| elts.len() > 1
+        );
     map(
-        delimited(
-            terminated(tag("("), space0),
-            // The reason these are separated is that the alt parser
-            // will try to parse "base, type" first. If that fails,
-            // then "function, type". If we try to put the alternate
-            // in the left side of the tuple, then the base type parser
-            // will consume the first part of the function type and fail
-            // on the " -> ". This was not tested and was based on my
-            // understanding of the parser type.
-            alt((
-                separated_pair(
-                    parse_type_base,
-                    delimited(space0, tag(","), space0),
-                    parse_type,
-                ),
-                separated_pair(
-                    parse_type_function,
-                    delimited(space0, tag(","), space0),
-                    parse_type,
-                ),
-            )),
-            preceded(space0, tag(")")),
-        ),
-        |(t1, t2): (ParsedType, ParsedType)| ParsedType::Tuple(Box::new(t1), Box::new(t2))
+        parser,
+        |elts: Vec<ParsedType>| ParsedType::Tuple(
+            elts.into_iter().map(|e| Box::new(e)).collect()
+        )
     )(i)
 }
 
@@ -412,8 +404,23 @@ fn test_parse_type_tuple() {
     assert_eq!(parse_type_tuple("(int, int)"),
                Ok(("",
                    ParsedType::Tuple(
-                       Box::new(ParsedType::BaseType("int".to_string())),
-                       Box::new(ParsedType::BaseType("int".to_string())),
+                       vec![
+                           Box::new(ParsedType::BaseType("int".to_string())),
+                           Box::new(ParsedType::BaseType("int".to_string())),
+                       ]
+                    )
+
+               )),
+               "Failed to parse tuple type"
+    );
+    assert_eq!(parse_type_tuple("(int, int, bool)"),
+               Ok(("",
+                   ParsedType::Tuple(
+                       vec![
+                           Box::new(ParsedType::BaseType("int".to_string())),
+                           Box::new(ParsedType::BaseType("int".to_string())),
+                           Box::new(ParsedType::BaseType("bool".to_string())),
+                       ]
                     )
 
                )),
