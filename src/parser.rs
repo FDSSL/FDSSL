@@ -86,7 +86,7 @@ enum ParsedType {
 fn parse_type_function(i: &str) -> IResult<&str, ParsedType> {
     map(
         tuple((
-            alt((parse_type_base, parse_type_tuple)),
+            parse_type,
             delimited(space1, tag("->"), space1),
             parse_type,
         )),
@@ -124,9 +124,9 @@ fn parse_type_base(i: &str) -> IResult<&str, ParsedType> {
 fn parse_type(i: &str) -> IResult<&str, ParsedType> {
     let (i, _) = space0(i)?;
     alt((
+        parse_type_base,
         parse_type_tuple,
         parse_type_function,
-        parse_type_base
     ))(i)
 }
 // Parses a comment, which is a valid element in our abstract syntax
