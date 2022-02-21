@@ -52,11 +52,11 @@ pub enum Expr {
     D(f64),
     Ref(String),
     Return(Box<Expr>),
-    Vect {
-        is_matrix: bool,
-        datatype: Type,
-        value: Vec<Box<Expr>>,
-    },
+    Vect(Box<Vec<Expr>>),
+    NamedVect(Box<Vec<(String,Expr)>>),
+    // Vect {
+    //     value: Vec<Box<Expr>>,
+    // },
     Def {
         name: String,
         value: Box<Expr>,

@@ -1,13 +1,12 @@
 use crate::syntax;
 
 use syntax::Expr;
-use syntax::Type;
 extern crate nom;
 
 
 use nom::bytes::complete::{is_not, tag};
 
-use nom::character::complete::{char, alpha1, alphanumeric1, i32, multispace0, space0, space1, not_line_ending, line_ending};
+use nom::character::complete::{char, alpha1, alphanumeric1, i32, multispace0, space0, space1, not_line_ending, digit1};
 
 use nom::{Needed};
 use nom::{IResult};
@@ -17,8 +16,7 @@ use nom::multi::{many0, many1, separated_list0, separated_list1};
 
 use nom::sequence::{preceded, delimited, terminated, separated_pair, tuple, pair};
 use nom::number::complete::{float, double};
-use nom::combinator::{map, verify, opt, recognize};
-
+use nom::combinator::{map, verify, recognize, peek, opt, fail};
 
 // pub struct Program {
 //     main: Expr,
@@ -38,6 +36,16 @@ fn name(i: &str) -> IResult<&str, &str> {
     )(i)
 }
 
+/// Parses a name into a String
+fn name_str(i: &str) -> IResult<&str, String> {
+    map(recognize(
+        pair(
+            alt((alpha1, tag("_"))),
+            many0(alt((alphanumeric1, tag("_"))))
+        )
+    ), |s: &str| s.to_string())(i)
+}
+
 /// Parses an int, corresponding to a 32-bit int in Rust.
 /// Can be surrounded by spaces on either end
 
@@ -45,17 +53,25 @@ fn parse_int(input: &str) -> IResult<&str, Expr> {
     map(preceded(space0, i32), |i: i32| Expr::I(i))(input)
 }
 
-// we need to be careful in the type checker to prevent
-// numbers parsed as doubles being assigned to floats
-// and vice versa
 /// parse_float parses a 32-bit floating point value, preceded by 0+ spaces.
+/// Floats are always denoted by a trailing 'f'
 fn parse_float(i: &str) -> IResult<&str, Expr> {
-    map(preceded(space0, float), |v: f32| Expr::F(v))(i)
+    map(preceded(space0, terminated(float, tag("f"))), |v: f32| Expr::F(v))(i)
 }
 
 /// parse_double parses a 64-bit floating point value, preceded by 0+ spaces.
+/// doubles are decimal precision numbers w/out a trailing f
 fn parse_double(i: &str) -> IResult<&str, Expr> {
-    map(preceded(space0, double), |v: f64| Expr::D(v))(i)
+    // if OK, parse it
+    // implicitly we don't need to check for 'f', since the float parser would have greedily taken it
+    let mut parser = peek(preceded(space0 , preceded(opt(tag("-")), preceded(digit1, preceded(tag("."), parse_int)))));
+    if parser(i).is_ok() {
+        // proceed to parse a double
+        map(preceded(space0, double), |v: f64| Expr::D(v))(i)
+    } else {
+        // fail out on this
+        fail(i)
+    }
 }
 
 /// parse_ref parses a reference, which is defined by the `name` parser, see `name`
@@ -182,14 +198,48 @@ fn parse_nested_expr(input: &str) -> IResult<&str, Expr> {
     )(input)
 }
 
+/// Parses a vector w/ implicit numeric indices as a Boxed vector of Exprs
+fn parse_vect(input: &str) -> IResult<&str, Expr> {
+    let p = delimited(
+        preceded(space0, char('(')),
+        separated_list1(preceded(space0, tag(",")), parse_expr),
+        preceded(space0, char(')'))
+    );
+    map(p, |s: Vec<Expr>| Expr::Vect(Box::new(s)))(input)
+}
+
+/// Parses a vector w/ named indices as a Boxed vector of Exprs
+fn parse_named_vect(input: &str) -> IResult<&str, Expr> {
+    let p = delimited(
+        preceded(space0, char('(')),
+        // name : expr
+        separated_list1(preceded(space0, tag(",")), separated_pair(preceded(space0, name_str), preceded(space0, tag(":")), parse_expr)),
+        preceded(space0, char(')'))
+    );
+    map(p, |s: Vec<(String,Expr)>| Expr::NamedVect(Box::new(s)))(input)
+}
+
 /// Parses a standalone expression
 /// Represents all possible expansions for parsing exprs
 fn parse_expr(input: &str) -> IResult<&str, Expr> {
     alt((
+        parse_float,
+        parse_double,
         parse_int,
         parse_bool,
         parse_comment,
-        parse_nested_expr
+        parse_nested_expr,
+        parse_named_vect,
+        parse_vect,
+        parse_ref,
+        // TODO parse binOp:    parse_expr,parse_binop,parse_expr
+        // TODO parse app:      parse_ref,(,tuple(parse_expr),)
+        // TODO parse branch:   if,(,parse_expr,),{,parse_expr*,}, ... opt elseif and else?
+        // TODO parse def:      parse_ref,':',parse_type,'=',parse_expr
+        // TODO parse mutDef:   parse_ref,':','mut',parse_type,'=',parse_expr
+        // TODO parse forLoop:  for,(parse_expr x 3),{,parse_expr*,}
+        // TODO NO parsing functions...we get them for free w/ def/mutDef
+        // TODO parse_abs (parameterzied abstraction)
     ))(input)
 }
 
@@ -332,24 +382,39 @@ fn test_parse_bools() {
 /// Tests parsing various floats
 #[test]
 fn test_parse_floats() {
-    assert_eq!(parse_float("12.23"), Ok(("", Expr::F(12.23))), "Failed to parse 12.23");
-    assert_eq!(parse_float("  0.98"), Ok(("", Expr::F(0.98))), "Failed to parse 0.98");
-    assert_eq!(parse_float(" -5.2  "), Ok(("  ", Expr::F(-5.2))), "Failed to parse -5.2");
+    assert_eq!(parse_float("12.23f"), Ok(("", Expr::F(12.23))), "Failed to parse 12.23");
+    assert_eq!(parse_float("  0.98f"), Ok(("", Expr::F(0.98))), "Failed to parse 0.98");
+    assert_eq!(parse_float(" -5.2f  "), Ok(("  ", Expr::F(-5.2))), "Failed to parse -5.2");
     assert_eq!(parse_float(" 12").is_ok(), false, "Float parser failed. Parsed an integer, 12");
 }
 
 /// Tests parsing various doubles
 #[test]
 fn test_parse_doubles() {
-    // TODO .....
-    assert!(false, "Double tests not implemented yet!");
+    assert_eq!(parse_double("12.23"), Ok(("", Expr::D(12.23))), "Failed to parse 12.23");
+    assert_eq!(parse_double("  0.98"), Ok(("", Expr::D(0.98))), "Failed to parse 0.98");
+    assert_eq!(parse_double(" -5.2  "), Ok(("  ", Expr::D(-5.2))), "Failed to parse -5.2");
+    assert_eq!(parse_double(" 12").is_ok(), false, "Double parser failed. Parsed an integer, 12");
+    assert_eq!(parse_double("1.5f"), Ok(("f", Expr::D(1.5))), "Double parser stopped short of parsing a float.");
 }
 
 /// Tests parsing various refs
 #[test]
 fn test_parse_refs() {
-    // TODO .....
-    assert!(false, "Ref tests not implemented yet!");
+    // parse a-z ref
+    assert_eq!(parse_ref("a"), Ok(("", Expr::Ref("a".to_string()))), "Failed to parse lowercased ref");
+    // parse upper case ref
+    assert_eq!(parse_ref("XYZ"), Ok(("", Expr::Ref("XYZ".to_string()))), "Failed to parse uppercased ref");
+    // parse mixed ref
+    assert_eq!(parse_ref("aBc"), Ok(("", Expr::Ref("aBc".to_string()))), "Failed to parse mixed case ref");
+    // parse ref w/ numbers
+    assert_eq!(parse_ref("c7171"), Ok(("", Expr::Ref("c7171".to_string()))), "Failed to parse mixed ref w/ numbers");
+    // parse ref w/ underscores
+    assert_eq!(parse_ref("_c71_71"), Ok(("", Expr::Ref("_c71_71".to_string()))), "Failed to parse mixed ref w/ underscores");
+    // verify you cannot parse with leading numbers
+    assert_eq!(parse_ref("1_c71_71").is_ok(), false, "Failed to reject ref w/ leading digit");
+    // verify you cannot parse w/ leading negative
+    assert_eq!(parse_ref("-_c71_71").is_ok(), false, "Failed to reject ref w/ leading dash");
 }
 
 /// Tests parsing a comment
@@ -374,29 +439,45 @@ fn test_parse_nested_expr() {
 }
 
 
-/// Tests parsing a type annotation (a name)
-#[test]
-fn test_parse_typeAnnotation() {
-    // TODO .....
-    // i : int = 2  <--- we want to recognize 'int'
-    // v : ivect = (1,2,3) <-- integer vect, w/e
-    assert!(false, "Type annotation tests not implemented yet!");
-}
-
-/// Tests parsing an expr
+/// Tests parsing various complete expr
 #[test]
 fn test_parse_expr() {
-    // TODO .....
-    assert!(false, "General expr tests not implemented yet");
+    // parse int
+    assert_eq!(parse_expr("5"), Ok(("", Expr::I(5))), "Failed to parse int as Expr");
+    // parse bool
+    assert_eq!(parse_expr("false"), Ok(("", Expr::B(false))), "Failed to parse bool as Expr");
+    // parse comment
+    assert_eq!(parse_expr("//test"), Ok(("", Expr::Comment(vec!["test".into()]))), "Failed to parse comment as Expr");
+    // parse nested expr
+    assert_eq!(parse_expr("((32))"), Ok(("", Expr::I(32))), "Failed to parse nested expr as Expr");
+    // parse vect
+    assert_eq!(parse_expr("(1,2,3)"), Ok(("", Expr::Vect(Box::new(vec![Expr::I(1),Expr::I(2),Expr::I(3)])))), "Failed to parse a simple vect of ints as an expr");
 }
 
-/// Tests parsing vectors
+/// Tests parsing vectors with indices (no names)
 #[test]
 fn test_parse_vect() {
-    // TODO .....
-    // v : ivect = (1,2,3)
-    // special 'parseVect' parser, should use defParser (immutable)
-    assert!(false, "Vector tests not implemented yet!");
+    assert_eq!(parse_vect("(1,2,3)"), Ok(("", Expr::Vect(Box::new(vec![Expr::I(1),Expr::I(2),Expr::I(3)])))), "Failed to parse a simple vect of ints");
+    assert_eq!(parse_vect("(1,true)"), Ok(("", Expr::Vect(Box::new(vec![Expr::I(1),Expr::B(true)])))), "Failed to parse a mixed vect");
+    assert_eq!(parse_vect("(3,)").is_ok(), false, "Recognized an invalid tuple statement");
+    assert_eq!(parse_vect("(,3)").is_ok(), false, "Recognized another invalid tuple statement");
+}
+
+/// Tests parsing vectors with names (akin to structs)
+#[test]
+fn test_parse_named_vect() {
+    // test parsing a named one of 1 item
+    assert_eq!(parse_expr("(n:2)"), Ok(("", Expr::NamedVect(Box::new(vec![("n".to_string(),Expr::I(2))])))), "Failed to parse a tiny named vect");
+    // test parsing a named one of 2 items
+    assert_eq!(parse_expr("(x:12, y:false)"), Ok(("", Expr::NamedVect(Box::new(vec![("x".to_string(),Expr::I(12)), ("y".to_string(), Expr::B(false))])))), "Failed to parse a named vect w/ 2 items");
+    // test parsing w/ one bad name
+    assert_eq!(parse_expr("(x:1, -a:19)").is_ok(), false, "Failed to reject bad name for named vect");
+    // test parsing w/ one missing a name
+    assert_eq!(parse_expr("(x:1, a:19, 2)").is_ok(), false, "Failed to reject w/ missing name for named vect");
+    // test parsing w/ extra comma
+    assert_eq!(parse_expr("(a:1, b:19, c:2,)").is_ok(), false, "Failed to reject w/ extra comma at end of named vect");
+    // test parsing where name & value are same (ambiguous case that is resolved in type checker w/ an error)
+    assert_eq!(parse_expr("(a:a, b:2)"), Ok(("", Expr::NamedVect(Box::new(vec![("a".to_string(),Expr::Ref("a".to_string())), ("b".to_string(), Expr::I(2))])))), "Failed to accept parsing ambiguous name case");
 }
 
 /// Tests parsing a return statement
