@@ -1,19 +1,19 @@
 use crate::syntax;
 
 use syntax::Expr;
+use syntax::BOp;
+extern crate itertools;
+use itertools::Itertools;
+
+use std::collections::HashMap;
+
 extern crate nom;
-
-
 use nom::bytes::complete::{is_not, tag};
-
 use nom::character::complete::{char, alpha1, alphanumeric1, i32, multispace0, space0, space1, not_line_ending, digit1};
-
 use nom::{Needed};
 use nom::{IResult};
-
 use nom::branch::alt;
 use nom::multi::{many0, many1, separated_list0, separated_list1};
-
 use nom::sequence::{preceded, delimited, terminated, separated_pair, tuple, pair};
 use nom::number::complete::{float, double};
 use nom::combinator::{map, verify, recognize, peek, opt, fail};
@@ -205,7 +205,7 @@ fn parse_vect(input: &str) -> IResult<&str, Expr> {
         separated_list1(preceded(space0, tag(",")), parse_expr),
         preceded(space0, char(')'))
     );
-    map(p, |s: Vec<Expr>| Expr::Vect(Box::new(s)))(input)
+    map(p, |s: Vec<Expr>| Expr::Vect(s))(input)
 }
 
 /// Parses a vector w/ named indices as a Boxed vector of Exprs
@@ -216,8 +216,61 @@ fn parse_named_vect(input: &str) -> IResult<&str, Expr> {
         separated_list1(preceded(space0, tag(",")), separated_pair(preceded(space0, name_str), preceded(space0, tag(":")), parse_expr)),
         preceded(space0, char(')'))
     );
-    map(p, |s: Vec<(String,Expr)>| Expr::NamedVect(Box::new(s)))(input)
+    map(p, |s: Vec<(String,Expr)>| Expr::NamedVect(s))(input)
 }
+/// parse_binop parses all the binary operators in the language.
+fn parse_binop(i: &str) -> IResult<&str, BOp> {
+    // I wanted to use this list of tuple constructtion to make it easier to edit
+    // the total number of binary operators. Unfortunately this shows up in the
+    // type annotation when we collect into tuples, but that's relatively easy
+    // to fix and not prone to mispellings.
+    let tups = [
+        ("+",  BOp::Add),
+        ("-",  BOp::Sub),
+        ("*",  BOp::Mul),
+        ("/",  BOp::Div),
+        ("%",  BOp::Mod),
+        ("&&", BOp::And),
+        ("||", BOp::Or),
+        (".",  BOp::Compose),
+        ("==", BOp::Eq),
+        ("!=", BOp::Neq),
+        (">=", BOp::Gte),
+        ("<=", BOp::Lte),
+        (">",  BOp::Gt),
+        ("<",  BOp::Lt),
+        ("&",  BOp::BitAnd),
+        ("|",  BOp::BitOr),
+        ("^",  BOp::BitXor),
+    ];
+    let assoc = HashMap::from(tups);
+
+    // Collect the binop tokens into a vector so we can transform them into parsers.
+    let keys: Vec<_> = tups.iter().map(|(s, _): &(&str,BOp)| tag(*s)).collect();
+
+    // We need to break this up into two tuples because `collect_tuple` only collects
+    // up to 12 element tuples, and we have 17 elements. The reason we need to collect
+    // them into tuples is because `alt` only takes tuples. If we could collect up to
+    // 17 into a tuple, then this wouldn't be needed.
+    let l: (_,_,_,_,_,_,_,_,_) = keys[0..9].iter().collect_tuple().unwrap();
+    let r: (_,_,_,_,_,_,_,_)   = keys[9..] .iter().collect_tuple().unwrap();
+
+    // This pattern is recommended if you have >21 parsers to work with, but here
+    // we are doing it because we can't collect into a tuple large enough to fit
+    // all of the binop parsers
+    let (i, out) = alt((alt(l), alt(r)))(i)?;
+    Ok((i, assoc[out]))
+}
+
+// fn parse_binop(i: &str) -> IResult<&str, Expr> {
+//     alt((
+//         tag()
+//     ))
+// }
+
+// fn parse_binexp(i: &str) -> IResult<&str, Expr> {
+//     let parser = tuple((parse_expr, parse_binop, parse_expr))
+// }
 
 /// Parses a standalone expression
 /// Represents all possible expansions for parsing exprs
@@ -451,14 +504,14 @@ fn test_parse_expr() {
     // parse nested expr
     assert_eq!(parse_expr("((32))"), Ok(("", Expr::I(32))), "Failed to parse nested expr as Expr");
     // parse vect
-    assert_eq!(parse_expr("(1,2,3)"), Ok(("", Expr::Vect(Box::new(vec![Expr::I(1),Expr::I(2),Expr::I(3)])))), "Failed to parse a simple vect of ints as an expr");
+    assert_eq!(parse_expr("(1,2,3)"), Ok(("", Expr::Vect(vec![Expr::I(1),Expr::I(2),Expr::I(3)]))), "Failed to parse a simple vect of ints as an expr");
 }
 
 /// Tests parsing vectors with indices (no names)
 #[test]
 fn test_parse_vect() {
-    assert_eq!(parse_vect("(1,2,3)"), Ok(("", Expr::Vect(Box::new(vec![Expr::I(1),Expr::I(2),Expr::I(3)])))), "Failed to parse a simple vect of ints");
-    assert_eq!(parse_vect("(1,true)"), Ok(("", Expr::Vect(Box::new(vec![Expr::I(1),Expr::B(true)])))), "Failed to parse a mixed vect");
+    assert_eq!(parse_vect("(1,2,3)"), Ok(("", Expr::Vect(vec![Expr::I(1),Expr::I(2),Expr::I(3)]))), "Failed to parse a simple vect of ints");
+    assert_eq!(parse_vect("(1,true)"), Ok(("", Expr::Vect(vec![Expr::I(1),Expr::B(true)]))), "Failed to parse a mixed vect");
     assert_eq!(parse_vect("(3,)").is_ok(), false, "Recognized an invalid tuple statement");
     assert_eq!(parse_vect("(,3)").is_ok(), false, "Recognized another invalid tuple statement");
 }
@@ -467,9 +520,9 @@ fn test_parse_vect() {
 #[test]
 fn test_parse_named_vect() {
     // test parsing a named one of 1 item
-    assert_eq!(parse_expr("(n:2)"), Ok(("", Expr::NamedVect(Box::new(vec![("n".to_string(),Expr::I(2))])))), "Failed to parse a tiny named vect");
+    assert_eq!(parse_expr("(n:2)"), Ok(("", Expr::NamedVect(vec![("n".to_string(),Expr::I(2))]))), "Failed to parse a tiny named vect");
     // test parsing a named one of 2 items
-    assert_eq!(parse_expr("(x:12, y:false)"), Ok(("", Expr::NamedVect(Box::new(vec![("x".to_string(),Expr::I(12)), ("y".to_string(), Expr::B(false))])))), "Failed to parse a named vect w/ 2 items");
+    assert_eq!(parse_expr("(x:12, y:false)"), Ok(("", Expr::NamedVect(vec![("x".to_string(),Expr::I(12)), ("y".to_string(), Expr::B(false))]))), "Failed to parse a named vect w/ 2 items");
     // test parsing w/ one bad name
     assert_eq!(parse_expr("(x:1, -a:19)").is_ok(), false, "Failed to reject bad name for named vect");
     // test parsing w/ one missing a name
@@ -477,7 +530,7 @@ fn test_parse_named_vect() {
     // test parsing w/ extra comma
     assert_eq!(parse_expr("(a:1, b:19, c:2,)").is_ok(), false, "Failed to reject w/ extra comma at end of named vect");
     // test parsing where name & value are same (ambiguous case that is resolved in type checker w/ an error)
-    assert_eq!(parse_expr("(a:a, b:2)"), Ok(("", Expr::NamedVect(Box::new(vec![("a".to_string(),Expr::Ref("a".to_string())), ("b".to_string(), Expr::I(2))])))), "Failed to accept parsing ambiguous name case");
+    assert_eq!(parse_expr("(a:a, b:2)"), Ok(("", Expr::NamedVect(vec![("a".to_string(),Expr::Ref("a".to_string())), ("b".to_string(), Expr::I(2))]))), "Failed to accept parsing ambiguous name case");
 }
 
 /// Tests parsing a return statement
@@ -564,10 +617,24 @@ fn test_parse_app() {
 
 /// Tests parsing a binop
 #[test]
-fn test_parse_binop() {
-    // TODO .....
-    // +,-,/,*, etc...
-    assert!(false, "BinOp tests not implemented yet!");
+fn test_parse_binop(){
+    assert_eq!(parse_binop("+"), Ok(("", BOp::Add)), "Failed to parse Add binop");
+    assert_eq!(parse_binop("-"), Ok(("", BOp::Sub)), "Failed to parse Sub binop");
+    assert_eq!(parse_binop("*"), Ok(("", BOp::Mul)), "Failed to parse Mul binop");
+    assert_eq!(parse_binop("/"), Ok(("", BOp::Div)), "Failed to parse Div binop");
+    assert_eq!(parse_binop("%"), Ok(("", BOp::Mod)), "Failed to parse Mod binop");
+    assert_eq!(parse_binop("&&"), Ok(("", BOp::And)), "Failed to parse And binop");
+    assert_eq!(parse_binop("||"), Ok(("", BOp::Or)), "Failed to parse Or binop");
+    assert_eq!(parse_binop("."), Ok(("", BOp::Compose)), "Failed to parse Compose binop");
+    assert_eq!(parse_binop("=="), Ok(("", BOp::Eq)), "Failed to parse Eq binop");
+    assert_eq!(parse_binop("!="), Ok(("", BOp::Neq)), "Failed to parse Neq binop");
+    assert_eq!(parse_binop(">"), Ok(("", BOp::Gt)), "Failed to parse Gt binop");
+    assert_eq!(parse_binop(">="), Ok(("", BOp::Gte)), "Failed to parse Gte binop");
+    assert_eq!(parse_binop("<"), Ok(("", BOp::Lt)), "Failed to parse Lt binop");
+    assert_eq!(parse_binop("<="), Ok(("", BOp::Lte)), "Failed to parse Lte binop");
+    assert_eq!(parse_binop("&"), Ok(("", BOp::BitAnd)), "Failed to parse BitAnd binop");
+    assert_eq!(parse_binop("|"), Ok(("", BOp::BitOr)), "Failed to parse BitOr binop");
+    assert_eq!(parse_binop("^"), Ok(("", BOp::BitXor)), "Failed to parse BitXor binop");
 }
 
 /// Tests parsing a branch

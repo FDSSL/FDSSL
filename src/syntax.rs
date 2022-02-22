@@ -11,7 +11,7 @@ pub enum Type {
     Opaque(String),
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Clone,Copy)]
 pub enum BOp {
     Add,
     Sub,
@@ -52,8 +52,8 @@ pub enum Expr {
     D(f64),
     Ref(String),
     Return(Box<Expr>),
-    Vect(Box<Vec<Expr>>),
-    NamedVect(Box<Vec<(String,Expr)>>),
+    Vect(Vec<Expr>),
+    NamedVect(Vec<(String,Expr)>),
     // Vect {
     //     value: Vec<Box<Expr>>,
     // },
@@ -68,7 +68,7 @@ pub enum Expr {
     },
     App {
         fname: String,
-        arguments: Vec<Box<Expr>>,
+        arguments: Vec<Expr>,
     },
     BinOp {
         operator: BOp,
@@ -81,13 +81,13 @@ pub enum Expr {
     },
     Branch {
         condition: Box<Expr>,
-        b1: Vec<Box<Expr>>,
-        b2: Vec<Box<Expr>>,
+        b1: Vec<Expr>,
+        b2: Vec<Expr>,
     },
     For {
         condition: Box<Expr>,
         variable: Option<String>,
-        body: Vec<Box<Expr>>,
+        body: Vec<Expr>,
     },
     Access(String, AccessType),
     Comment(Vec<String>),
@@ -95,6 +95,6 @@ pub enum Expr {
         name: String,
         parameters: Vec<Parameter>,
         return_type: Vec<Parameter>,
-        body: Vec<Box<Expr>>,
+        body: Vec<Expr>,
     },
 }
