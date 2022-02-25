@@ -32,6 +32,12 @@ pub enum BOp {
     BitXor,
 }
 
+#[derive(Debug,PartialEq,Clone,Copy)]
+pub enum UOp {
+    Negative,
+    Negate
+}
+
 #[derive(Debug,PartialEq)]
 pub struct Parameter {
     name: String,
@@ -70,6 +76,10 @@ pub enum Expr {
         fname: String,
         arguments: Vec<Expr>,
     },
+    UnaryOp {
+        operator: UOp,
+        e: Box<Expr>
+    },
     BinOp {
         operator: BOp,
         e1: Box<Expr>,
@@ -86,8 +96,9 @@ pub enum Expr {
     },
     For {
         init: Box<Expr>,
-        condition: Box<Expr>,
-        variable: Option<String>,
+        cond: Box<Expr>,
+        post: Box<Expr>,
+        //variable: Option<String>,
         body: Vec<Expr>
     },
     Access(String, AccessType),

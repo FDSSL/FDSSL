@@ -2,6 +2,7 @@ use crate::syntax;
 
 use syntax::Expr;
 use syntax::BOp;
+use syntax::UOp;
 extern crate itertools;
 use itertools::Itertools;
 
@@ -43,9 +44,8 @@ fn name_str(i: &str) -> IResult<&str, String> {
 
 /// Parses an int, corresponding to a 32-bit int in Rust.
 /// Can be surrounded by spaces on either end
-
 fn parse_int(input: &str) -> IResult<&str, Expr> {
-    map(preceded(space0, terminated(i32, not(alt((alpha1, tag("_")))))), |i: i32| Expr::I(i))(input)
+    map(delimited(space0, i32, not(alt((alpha1, tag("_"))))), |i: i32| Expr::I(i))(input)
 }
 
 /// parse_float parses a 32-bit floating point value, preceded by 0+ spaces.
@@ -214,7 +214,7 @@ fn parse_vect(input: &str) -> IResult<&str, Expr> {
 
 /// Parses a function application
 fn parse_app(input: &str) -> IResult<&str, Expr> {
-    let (input,fname) = preceded(space0, name)(input)?;
+    let (input,fname) = preceded(space0, verify(name, |s: &str| !is_keyword(s)))(input)?;
 
     let p = delimited(
         preceded(space0, char('(')),
@@ -260,13 +260,53 @@ fn parse_abs(input: &str) -> IResult<&str, Expr> {
     Ok((input, Expr::Abs{params: params, body: exprs}))
 }
 
+fn parse_unary_expr(input: &str) -> IResult<&str, Expr> {
+    map(
+        tuple((parse_unary_op,parse_expr)),
+        |(o,e): (UOp, Expr)| Expr::UnaryOp{operator: o, e: Box::new(e)}
+    )(input)
+}
+
+/// Parses a unary expression
+fn parse_unary_op(input: &str) -> IResult<&str, UOp> {
+    // recognize a unary operator
+    let unary_pairs = [
+        ("-",  UOp::Negative),
+        ("!", UOp::Negate)
+    ];
+    let assoc = HashMap::from(unary_pairs);
+    // put it ahead of a standard expr
+
+    let keys: Vec<_> = unary_pairs.iter().map(|(s, _): &(&str,UOp)| tag(*s)).collect();
+    let parse_uop: (_,_) = keys[0..].iter().collect_tuple().unwrap();
+
+    let (i, out) = preceded(space0, alt(parse_uop))(input)?;
+    Ok((i, assoc[out]))
+}
+
 /// Parses a branch
-// fn parse_forloop(input: &str) -> IResult<&str, Expr> {
-//     let (input,_)       = preceded(space0, tag("for"))(input)?;
-//     // generate an init w/ a default non-name
-//     // TODO need to think about the structure of a for loop again
-//
-// }
+fn parse_forloop(input: &str) -> IResult<&str, Expr> {
+    let (input,_)           = preceded(space0, tag("for"))(input)?;
+    // parse 3 comma separate exprs
+    let (input,(e1,_,e2,_,e3)) = delimited(
+        preceded(space0, char('(')),
+        tuple((
+            parse_expr,
+            preceded(space0,char(',')),
+            parse_expr,
+            preceded(space0,char(',')),
+            parse_expr
+        )),
+        preceded(space0, char(')'))
+    )(input)?;
+    let (input, body)      = parse_scoped_exprs(input)?;
+    Ok((input, Expr::For{
+        init: Box::new(e1),
+        cond: Box::new(e2),
+        post: Box::new(e3),
+        body: body
+    }))
+}
 
 /// Parses a vector w/ named indices as a Boxed vector of Exprs
 fn parse_named_vect(input: &str) -> IResult<&str, Expr> {
@@ -339,6 +379,7 @@ fn parse_expr(input: &str) -> IResult<&str, Expr> {
         parse_float,
         parse_double,
         parse_int,
+        parse_unary_expr,
         parse_bool,
         parse_comment,
         parse_nested_expr,
@@ -348,6 +389,7 @@ fn parse_expr(input: &str) -> IResult<&str, Expr> {
         parse_return,
         parse_app,
         parse_branch,
+        parse_forloop,
         parse_ref,
         // TODO parse forLoop:  for,(parse_expr x 3),{,parse_expr*,}
         //parse_bin_expr,
@@ -528,13 +570,14 @@ fn test_parse_refs() {
     // parse ref w/ underscores
     assert_eq!(parse_expr("_c71_71"), Ok(("", Expr::Ref("_c71_71".to_string()))), "Failed to parse mixed ref w/ underscores");
     // verify you cannot parse with leading numbers
-    assert_eq!(parse_expr("1_c71_71").is_ok(), false, "Failed to reject ref w/ leading digit");
+    assert!(!parse_expr("1_c71_71").is_ok(), "Failed to reject ref w/ leading digit");
     // verify you cannot parse w/ leading negative
-    assert_eq!(parse_expr("-_c71_71").is_ok(), false, "Failed to reject ref w/ leading dash");
+    assert_eq!(parse_expr("-_c71_71"), Ok(("", Expr::UnaryOp{operator: UOp::Negative, e: Box::new(Expr::Ref("_c71_71".to_string()))})), "Failed to reject ref w/ leading dash");
+    //assert_eq!(parse_expr("-_c71_71"), Ok(("", i(1))), "Failed to reject ref w/ leading dash");
 
     // verify you can't parse keywords as refs
-    assert_eq!(parse_expr("if").is_ok(), false, "Failed to reject 'if' as reserved keyword, not a ref");
-    assert_eq!(parse_expr("for").is_ok(), false, "Failed to reject 'for' as reserved keyword, not a ref");
+    assert!(!parse_expr("if").is_ok(), "Failed to reject 'if' as reserved keyword, not a ref");
+    assert!(!parse_expr("for").is_ok(), "Failed to reject 'for' as reserved keyword, not a ref");
 }
 
 /// Tests parsing a comment
@@ -748,11 +791,26 @@ fn test_parse_abs() {
     assert_eq!(parse_expr("(x,y) \n { \n x \n\n\n y }") , Ok(("", a)), "Failed to parse a more complex abstraction");
 }
 
-/// Tests parsing a for loop
+/// Tests parsing for loops
 #[test]
 fn test_parse_forloop() {
-    // TODO .....
-    assert!(false, "For loop tests not implemented yet!");
+    let mut b = Expr::For{init: Box::new(i(1)), cond: Box::new(i(2)), post: Box::new(i(3)), body: vec![Expr::Ref("x".to_string())]};
+    assert_eq!(parse_expr("for(1,2,3){ x }"), Ok(("", b)), "Failed to parse simple forloop");
+
+    // test a for loop w/ multiple exprs
+    let mut b = Expr::For{init: Box::new(Expr::B(true)), cond: Box::new(Expr::B(false)), post: Box::new(Expr::F(3.0)), body: vec![app("f",vec![i(1)]), app("f2", vec![]), app("f3", vec![])]};
+    assert_eq!(parse_expr("for( true , false , 3.0f ) {\n\tf(1)\n\tf2()\n\tf3() }"), Ok(("", b)), "Failed to parse larger forloop");
+}
+
+/// Tests parsing of unary exprs
+#[test]
+fn test_parse_unaryexpr() {
+    // verify numbers parse as regular negative, no extra stuff
+    assert_eq!(parse_expr("-1") , Ok(("", i(-1))), "Failed to parse a negative int normally");
+
+    // verify refs parse w/ unary ops
+    assert_eq!(parse_expr("-a") , Ok(("", Expr::UnaryOp{operator: UOp::Negative, e: Box::new(Expr::Ref("a".to_string()))})), "Failed to parse a negative reference");
+
 }
 
 /// Tests parsing an vect access by name
