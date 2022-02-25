@@ -9,19 +9,14 @@ use std::collections::HashMap;
 
 extern crate nom;
 use nom::bytes::complete::{is_not, tag};
-use nom::character::complete::{char, alpha1, alphanumeric1, i32, multispace0, space0, space1, not_line_ending, digit1};
+use nom::character::complete::{char, alpha1, alphanumeric1, i32, multispace0, space0, space1, line_ending, not_line_ending, digit1};
 use nom::{Needed};
 use nom::{IResult};
 use nom::branch::alt;
 use nom::multi::{many0, many1, separated_list0, separated_list1};
 use nom::sequence::{preceded, delimited, terminated, separated_pair, tuple, pair};
 use nom::number::complete::{float, double};
-use nom::combinator::{map, verify, recognize, peek, opt, fail};
-
-// pub struct Program {
-//     main: Expr,
-//     functions: Vec<Expr>
-// }
+use nom::combinator::{map, verify, recognize, peek, opt, fail, not};
 
 
 /// name parses any valid identifier, [_a-zA-Z][_a-zA-Z0-9]*
@@ -50,7 +45,7 @@ fn name_str(i: &str) -> IResult<&str, String> {
 /// Can be surrounded by spaces on either end
 
 fn parse_int(input: &str) -> IResult<&str, Expr> {
-    map(preceded(space0, i32), |i: i32| Expr::I(i))(input)
+    map(preceded(space0, terminated(i32, not(alt((alpha1, tag("_")))))), |i: i32| Expr::I(i))(input)
 }
 
 /// parse_float parses a 32-bit floating point value, preceded by 0+ spaces.
@@ -74,9 +69,15 @@ fn parse_double(i: &str) -> IResult<&str, Expr> {
     }
 }
 
+/// Indicates whether a string is a keyword
+fn is_keyword(s: &str) -> bool {
+    let keywords = ["if","return","for","let","mut"];
+    return keywords.contains(&s)
+}
+
 /// parse_ref parses a reference, which is defined by the `name` parser, see `name`
 fn parse_ref(i: &str) -> IResult<&str, Expr> {
-    map(preceded(space0, name), |v: &str| Expr::Ref(v.to_string()))(i)
+    map(preceded(space0, verify(name, |s : &str| !is_keyword(s))), |s: &str| Expr::Ref(s.to_string()))(i)
 }
 
 // Parses a Boolean value w/ optional leading space
@@ -205,8 +206,67 @@ fn parse_vect(input: &str) -> IResult<&str, Expr> {
         separated_list1(preceded(space0, tag(",")), parse_expr),
         preceded(space0, char(')'))
     );
-    map(p, |s: Vec<Expr>| Expr::Vect(s))(input)
+    // match a vect, but be sure that it is NOT terminated w/ an opening curly brace
+    // if this is the case, it would clasify as a parameterized abstraction
+    // We may have gotten here because the abstraction was invalid, so we should continue to reject
+    map(terminated(p,not(tuple((multispace0,char('{'))))), |v: Vec<Expr>| Expr::Vect(v))(input)
 }
+
+/// Parses a function application
+fn parse_app(input: &str) -> IResult<&str, Expr> {
+    let (input,fname) = preceded(space0, name)(input)?;
+
+    let p = delimited(
+        preceded(space0, char('(')),
+        separated_list0(preceded(space0, tag(",")), parse_expr),
+        preceded(space0, char(')'))
+    );
+
+    map(p, |v: Vec<Expr>| Expr::App{fname: fname.to_string(), arguments: v})(input)
+}
+
+/// Parses scoped expressions, as part of a function body or parametrized expression
+fn parse_scoped_exprs(input: &str) -> IResult<&str, Vec<Expr>> {
+    // parse to the end of a line
+    let parseToEOL  = preceded(space0, line_ending);
+    // parse as many singular line separated exprs as we can find, works as long as there is 1 more expr to parse
+    // using many1 to consume multiple linebreaks between exprs, if present
+    let pblock      = many0(terminated(parse_expr, terminated(many1(parseToEOL), peek(parse_expr))));
+    // parse the block, and then parse the leftover expr as well (we're guaranteed 1 leftover expr at this point, if it's a valid abstraction)
+    let pbody       = tuple((pblock,parse_expr));
+    let (input,(mut el,e)) = delimited(preceded(multispace0, terminated(char('{'), multispace0)), pbody, preceded(multispace0, char('}')))(input)?;
+    // add the straggler expr to our Vec of exprs
+    el.push(e);
+    Ok((input, el))
+}
+
+/// Parses a branch
+fn parse_branch(input: &str) -> IResult<&str, Expr> {
+    let (input,_)       = preceded(space0, tag("if"))(input)?;
+    let (input,cond)    = preceded(space0, parse_expr)(input)?;
+    let (input,b1)      = parse_scoped_exprs(input)?;
+    let (input,_)       = preceded(space0, tag("else"))(input)?;
+    let (input,b2)      = parse_scoped_exprs(input)?;
+    return Ok((input, Expr::Branch{condition: Box::new(cond), b1: b1, b2: b2}))
+}
+
+/// Parses a parameterized abstraction
+/// This is used for function bodies
+/// The parameters themselves lack a type here, as they are bound by the context they are assigned within
+fn parse_abs(input: &str) -> IResult<&str, Expr> {
+    // parse delimited args
+    let (input,params)  = delimited(preceded(space0, char('(')), separated_list0(preceded(space0, tag(",")), name_str), preceded(space0, char(')')))(input)?;
+    let (input,exprs)   = parse_scoped_exprs(input)?;
+    Ok((input, Expr::Abs{params: params, body: exprs}))
+}
+
+/// Parses a branch
+// fn parse_forloop(input: &str) -> IResult<&str, Expr> {
+//     let (input,_)       = preceded(space0, tag("for"))(input)?;
+//     // generate an init w/ a default non-name
+//     // TODO need to think about the structure of a for loop again
+//
+// }
 
 /// Parses a vector w/ named indices as a Boxed vector of Exprs
 fn parse_named_vect(input: &str) -> IResult<&str, Expr> {
@@ -283,16 +343,19 @@ fn parse_expr(input: &str) -> IResult<&str, Expr> {
         parse_comment,
         parse_nested_expr,
         parse_named_vect,
+        parse_abs,
         parse_vect,
+        parse_return,
+        parse_app,
+        parse_branch,
         parse_ref,
+        // TODO parse forLoop:  for,(parse_expr x 3),{,parse_expr*,}
+        //parse_bin_expr,
+        //parse_unary_expr,
         // TODO parse binOp:    parse_expr,parse_binop,parse_expr
-        // TODO parse app:      parse_ref,(,tuple(parse_expr),)
-        // TODO parse branch:   if,(,parse_expr,),{,parse_expr*,}, ... opt elseif and else?
         // TODO parse def:      parse_ref,':',parse_type,'=',parse_expr
         // TODO parse mutDef:   parse_ref,':','mut',parse_type,'=',parse_expr
-        // TODO parse forLoop:  for,(parse_expr x 3),{,parse_expr*,}
         // TODO NO parsing functions...we get them for free w/ def/mutDef
-        // TODO parse_abs (parameterzied abstraction)
     ))(input)
 }
 
@@ -448,47 +511,54 @@ fn test_parse_doubles() {
     assert_eq!(parse_double("  0.98"), Ok(("", Expr::D(0.98))), "Failed to parse 0.98");
     assert_eq!(parse_double(" -5.2  "), Ok(("  ", Expr::D(-5.2))), "Failed to parse -5.2");
     assert_eq!(parse_double(" 12").is_ok(), false, "Double parser failed. Parsed an integer, 12");
-    assert_eq!(parse_double("1.5f"), Ok(("f", Expr::D(1.5))), "Double parser stopped short of parsing a float.");
+    assert!(!parse_double("1.5f").is_ok(), "Double parser did not stop short of parsing a float.");
 }
 
 /// Tests parsing various refs
 #[test]
 fn test_parse_refs() {
     // parse a-z ref
-    assert_eq!(parse_ref("a"), Ok(("", Expr::Ref("a".to_string()))), "Failed to parse lowercased ref");
+    assert_eq!(parse_expr("a"), Ok(("", Expr::Ref("a".to_string()))), "Failed to parse lowercased ref");
     // parse upper case ref
-    assert_eq!(parse_ref("XYZ"), Ok(("", Expr::Ref("XYZ".to_string()))), "Failed to parse uppercased ref");
+    assert_eq!(parse_expr("XYZ"), Ok(("", Expr::Ref("XYZ".to_string()))), "Failed to parse uppercased ref");
     // parse mixed ref
-    assert_eq!(parse_ref("aBc"), Ok(("", Expr::Ref("aBc".to_string()))), "Failed to parse mixed case ref");
+    assert_eq!(parse_expr("aBc"), Ok(("", Expr::Ref("aBc".to_string()))), "Failed to parse mixed case ref");
     // parse ref w/ numbers
-    assert_eq!(parse_ref("c7171"), Ok(("", Expr::Ref("c7171".to_string()))), "Failed to parse mixed ref w/ numbers");
+    assert_eq!(parse_expr("c7171"), Ok(("", Expr::Ref("c7171".to_string()))), "Failed to parse mixed ref w/ numbers");
     // parse ref w/ underscores
-    assert_eq!(parse_ref("_c71_71"), Ok(("", Expr::Ref("_c71_71".to_string()))), "Failed to parse mixed ref w/ underscores");
+    assert_eq!(parse_expr("_c71_71"), Ok(("", Expr::Ref("_c71_71".to_string()))), "Failed to parse mixed ref w/ underscores");
     // verify you cannot parse with leading numbers
-    assert_eq!(parse_ref("1_c71_71").is_ok(), false, "Failed to reject ref w/ leading digit");
+    assert_eq!(parse_expr("1_c71_71").is_ok(), false, "Failed to reject ref w/ leading digit");
     // verify you cannot parse w/ leading negative
-    assert_eq!(parse_ref("-_c71_71").is_ok(), false, "Failed to reject ref w/ leading dash");
+    assert_eq!(parse_expr("-_c71_71").is_ok(), false, "Failed to reject ref w/ leading dash");
+
+    // verify you can't parse keywords as refs
+    assert_eq!(parse_expr("if").is_ok(), false, "Failed to reject 'if' as reserved keyword, not a ref");
+    assert_eq!(parse_expr("for").is_ok(), false, "Failed to reject 'for' as reserved keyword, not a ref");
 }
 
 /// Tests parsing a comment
 #[test]
 fn test_parse_comment() {
-    assert_eq!(parse_comment("//"), Ok(("", Expr::Comment(vec!["".into()]))), "Failed to parse empty comment");
-    assert_eq!(parse_comment("// this is a comment"), Ok(("", Expr::Comment(vec![" this is a comment".into()]))), "Failed to parse regular comment");
-    assert_eq!(parse_comment(" // ok"), Ok(("", Expr::Comment(vec![" ok".into()]))), "Failed to parse comment w/ leading space");
-    assert_eq!(verify_parse(parse_comment("f // ok")), false, "Failed to reject a non-comment");
-    assert_eq!(parse_comment(" // ok\nand more"), Ok(("\nand more", Expr::Comment(vec![" ok".into()]))), "Didn't stop parsing comment at \n");
+    assert_eq!(parse_expr("//"), Ok(("", Expr::Comment(vec!["".into()]))), "Failed to parse empty comment");
+    assert_eq!(parse_expr("// this is a comment"), Ok(("", Expr::Comment(vec![" this is a comment".into()]))), "Failed to parse regular comment");
+    assert_eq!(parse_expr(" // ok"), Ok(("", Expr::Comment(vec![" ok".into()]))), "Failed to parse comment w/ leading space");
+
+    // just verify we reject non-comments
+    assert!(!parse_comment("f // ok").is_ok(), "Failed to reject a non-comment");
+
+    assert_eq!(parse_expr(" // ok\nand more"), Ok(("\nand more", Expr::Comment(vec![" ok".into()]))), "Didn't stop parsing comment at \n");
 }
 
 
 /// Tests parsing a nested expr w/ parens
 #[test]
 fn test_parse_nested_expr() {
-    assert_eq!(parse_nested_expr("(1)"), Ok(("", Expr::I(1))), "Failed to parse a nested int");
-    assert_eq!(parse_nested_expr(" ( true ) "), Ok((" ", Expr::B(true))), "Failed to parse a nested boolean");
-    assert_eq!(parse_nested_expr(" (( ((-5) ))) "), Ok((" ", Expr::I(-5))), "Failed to parse a deeply nested int");
-    assert_eq!(verify_parse(parse_nested_expr(" (( ((-5) )) ")), false, "Failed to reject a badly nested expr!");
-    assert_eq!(verify_parse(parse_nested_expr("()")), false, "Failed to reject empty parens w/ no expr");
+    assert_eq!(parse_expr("(1)"), Ok(("", Expr::I(1))), "Failed to parse a nested int");
+    assert_eq!(parse_expr(" ( true ) "), Ok((" ", Expr::B(true))), "Failed to parse a nested boolean");
+    assert_eq!(parse_expr(" (( ((-5) ))) "), Ok((" ", Expr::I(-5))), "Failed to parse a deeply nested int");
+    assert!(!parse_expr(" (( ((-5) )) ").is_ok(), "Failed to reject a badly nested expr!");
+    assert!(!parse_expr("()").is_ok(), "Failed to reject empty parens w/ no expr");
 }
 
 
@@ -510,10 +580,10 @@ fn test_parse_expr() {
 /// Tests parsing vectors with indices (no names)
 #[test]
 fn test_parse_vect() {
-    assert_eq!(parse_vect("(1,2,3)"), Ok(("", Expr::Vect(vec![Expr::I(1),Expr::I(2),Expr::I(3)]))), "Failed to parse a simple vect of ints");
-    assert_eq!(parse_vect("(1,true)"), Ok(("", Expr::Vect(vec![Expr::I(1),Expr::B(true)]))), "Failed to parse a mixed vect");
-    assert_eq!(parse_vect("(3,)").is_ok(), false, "Recognized an invalid tuple statement");
-    assert_eq!(parse_vect("(,3)").is_ok(), false, "Recognized another invalid tuple statement");
+    assert_eq!(parse_expr("(1,2,3)"), Ok(("", Expr::Vect(vec![Expr::I(1),Expr::I(2),Expr::I(3)]))), "Failed to parse a simple vect of ints");
+    assert_eq!(parse_expr("(1,true)"), Ok(("", Expr::Vect(vec![Expr::I(1),Expr::B(true)]))), "Failed to parse a mixed vect");
+    assert_eq!(parse_expr("(3,)").is_ok(), false, "Recognized an invalid tuple statement");
+    assert_eq!(parse_expr("(,3)").is_ok(), false, "Recognized another invalid tuple statement");
 }
 
 /// Tests parsing vectors with names (akin to structs)
@@ -536,10 +606,11 @@ fn test_parse_named_vect() {
 /// Tests parsing a return statement
 #[test]
 fn test_parse_return() {
-    assert_eq!(parse_return("return true"), Ok(("", Expr::Return(Box::new(Expr::B(true))))), "Failed to parse 'return true");
-    assert_eq!(parse_return("return 1"), Ok(("", Expr::Return(Box::new(Expr::I(1))))), "Failed to parse 'return 1");
-    assert_eq!(parse_return("return (1)"), Ok(("", Expr::Return(Box::new(Expr::I(1))))), "Failed to parse 'return true");
-    assert_eq!(parse_return("returnsdf").is_ok(), false, "Failed to reject 'returnsdf'");
+    assert_eq!(parse_expr("return true"), Ok(("", Expr::Return(Box::new(Expr::B(true))))), "Failed to parse 'return true");
+    assert_eq!(parse_expr("return 1"), Ok(("", Expr::Return(Box::new(Expr::I(1))))), "Failed to parse 'return 1");
+    assert_eq!(parse_expr("return (1)"), Ok(("", Expr::Return(Box::new(Expr::I(1))))), "Failed to parse 'return true");
+    // constitues a ref instead
+    //assert_eq!(parse_expr("returnsdf").is_ok(), false, "Failed to reject 'returnsdf'");
 }
 
 /// Tests parsing an immutable def
@@ -607,12 +678,21 @@ fn test_parse_defmut() {
     assert!(false, "Mutable Def tests not implemented yet!");
 }
 
+// Used to generate a mock expr object for testing
+fn app(name: &str, args: Vec<Expr>) -> Expr {
+    Expr::App{fname: name.to_string(), arguments: args}
+}
+
+fn i(v: i32) -> Expr {
+    Expr::I(v)
+}
+
 /// Tests parsing func application
 #[test]
 fn test_parse_app() {
-    // TODO .....
-    // name(expr1, expr2, ...)
-    assert!(false, "Func. App tests not implemented yet!");
+    assert_eq!(parse_expr("a()") , Ok(("", app("a", vec![]))), "Failed to parse basic app");
+    assert_eq!(parse_expr("another_name(1,false,2.0,3.3f)") , Ok(("", app("another_name", vec![i(1),Expr::B(false),Expr::D(2.0),Expr::F(3.3)]))), "Failed to parse more complex app");
+    assert_eq!(parse_expr("_validFunc(32,f(1))") , Ok(("", app("_validFunc", vec![i(32),app("f", vec![i(1)])]))), "Failed to parse nested app");
 }
 
 /// Tests parsing a binop
@@ -640,8 +720,32 @@ fn test_parse_binop(){
 /// Tests parsing a branch
 #[test]
 fn test_parse_branch() {
-    // TODO .....
-    assert!(false, "Branch tests not implemented yet!");
+    let mut b = Expr::Branch{condition: Box::new(Expr::B(true)), b1: vec![i(1)], b2: vec![i(2)]};
+    assert_eq!(parse_expr("if true { 1 } else { 2 }"), Ok(("", b)), "Failed to parse branch");
+    let mut b = Expr::Branch{condition: Box::new(app("verify", vec![Expr::B(false),Expr::B(true)])), b1: vec![i(1),i(2),Expr::B(true)], b2: vec![i(2),Expr::B(true)]};
+    assert_eq!(parse_expr("if verify(false,true) { 1\n2\ntrue } else { 2\ntrue }"), Ok(("", b)), "Failed to parse more complex branch");
+    assert_eq!(parse_expr("if oops(1,2) { 5 } else { 55").is_ok(), false, "Failed to discard badly formatted branch");
+
+    // TODO TESTING
+    // let mut b = Expr::Branch{condition: Box::new(Expr::B(true)), b1: vec![i(1)], b2: vec![i(2)]};
+    // assert_eq!(parse_expr("if oops(1,2) { 5 } else { 55"), Ok(("",b)), "Failed to discard badly formatted branch");
+}
+
+/// Tests parametrized abstractions
+#[test]
+fn test_parse_abs() {
+    let mut a = Expr::Abs{params: vec![], body: vec![i(5)]};
+    assert_eq!(parse_expr("() { 5 }") , Ok(("", a)), "Failed to parse a simple abstraction");
+
+    let mut a = Expr::Abs{params: vec!["x".to_string(), "y".to_string()], body: vec![Expr::Ref("x".to_string()),Expr::Ref("y".to_string())]};
+    assert_eq!(parse_expr("(x,y) { x \n y\n }") , Ok(("", a)), "Failed to parse a more complex abstraction");
+
+    // test w/ no break between exprs (invalid)
+    assert_eq!(parse_expr("(x,y) { x y }").is_ok(), false, "Failed to reject poorly formatted abstraction body");
+
+    // test an abstraction w/ many linebreaks between exprs, and elsewhere too
+    let mut a = Expr::Abs{params: vec!["x".to_string(), "y".to_string()], body: vec![Expr::Ref("x".to_string()),Expr::Ref("y".to_string())]};
+    assert_eq!(parse_expr("(x,y) \n { \n x \n\n\n y }") , Ok(("", a)), "Failed to parse a more complex abstraction");
 }
 
 /// Tests parsing a for loop

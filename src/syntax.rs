@@ -85,9 +85,10 @@ pub enum Expr {
         b2: Vec<Expr>,
     },
     For {
+        init: Box<Expr>,
         condition: Box<Expr>,
         variable: Option<String>,
-        body: Vec<Expr>,
+        body: Vec<Expr>
     },
     Access(String, AccessType),
     Comment(Vec<String>),
@@ -97,4 +98,9 @@ pub enum Expr {
         return_type: Vec<Parameter>,
         body: Vec<Expr>,
     },
+    // parameterized abstraction
+    Abs {
+        params: Vec<String>,
+        body: Vec<Expr>
+    }
 }
