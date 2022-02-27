@@ -255,7 +255,11 @@ fn parse_branch(input: &str) -> IResult<&str, Expr> {
 /// The parameters themselves lack a type here, as they are bound by the context they are assigned within
 fn parse_abs(input: &str) -> IResult<&str, Expr> {
     // parse delimited args
-    let (input,params)  = delimited(preceded(space0, char('(')), separated_list0(preceded(space0, tag(",")), name_str), preceded(space0, char(')')))(input)?;
+    let (input,params)  = delimited(
+        preceded(space0, char('(')),
+        separated_list0(preceded(space0, tag(",")), name_str),
+        preceded(space0, char(')'))
+    )(input)?;
     let (input,exprs)   = parse_scoped_exprs(input)?;
     Ok((input, Expr::Abs{params: params, body: exprs}))
 }
@@ -320,6 +324,7 @@ fn parse_named_vect(input: &str) -> IResult<&str, Expr> {
 }
 /// parse_binop parses all the binary operators in the language.
 fn parse_binop(i: &str) -> IResult<&str, BOp> {
+    let (i, _) = space0(i)?;
     // I wanted to use this list of tuple constructtion to make it easier to edit
     // the total number of binary operators. Unfortunately this shows up in the
     // type annotation when we collect into tuples, but that's relatively easy
@@ -362,15 +367,18 @@ fn parse_binop(i: &str) -> IResult<&str, BOp> {
     Ok((i, assoc[out]))
 }
 
-// fn parse_binop(i: &str) -> IResult<&str, Expr> {
-//     alt((
-//         tag()
-//     ))
-// }
+fn parse_binexpr(i: &str) -> IResult<&str, Expr> {
+    let (i, _) = space0(i)?;
+    map(
+        tuple((
+            parse_expr,
+            parse_binop,
+            parse_expr,
+        )),
+        |(e1, o, e2): (Expr, BOp, Expr)| Expr::BinOp{operator: o, e1: Box::new(e1), e2: Box::new(e2)}
+    )(i)
+}
 
-// fn parse_binexp(i: &str) -> IResult<&str, Expr> {
-//     let parser = tuple((parse_expr, parse_binop, parse_expr))
-// }
 
 /// Parses a standalone expression
 /// Represents all possible expansions for parsing exprs
@@ -758,6 +766,14 @@ fn test_parse_binop(){
     assert_eq!(parse_binop("&"), Ok(("", BOp::BitAnd)), "Failed to parse BitAnd binop");
     assert_eq!(parse_binop("|"), Ok(("", BOp::BitOr)), "Failed to parse BitOr binop");
     assert_eq!(parse_binop("^"), Ok(("", BOp::BitXor)), "Failed to parse BitXor binop");
+}
+
+#[test]
+fn test_parse_binexp() {
+    assert_eq!(parse_binexpr("1 + 2").is_ok(),true, "Failed to parse binary expresssion");
+    assert_eq!(parse_binexpr("1+ 2").is_ok(),true, "Failed to parse binary expresssion");
+    assert_eq!(parse_binexpr("1 +2").is_ok(),true, "Failed to parse binary expresssion");
+    assert_eq!(parse_binexpr("1+2").is_ok(),true, "Failed to parse binary expresssion");
 }
 
 /// Tests parsing a branch
