@@ -9,9 +9,9 @@ fn main() {
     kjsd {{{{}{pd{kdfj}kjd} }}}} {} {}";
     let res = match program(prog) {
         Ok((_, a)) => a,
-        _          => "Error: Not a function",
+        _          => vec![],
     };
-    println!("{}", res);
+    println!("{:?}", res);
 
 //     let x = DefMut {
 //         name: "x".to_string(),

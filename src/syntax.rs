@@ -11,6 +11,18 @@ pub enum Type {
     Opaque(String),
 }
 
+/// ParsedType is a structural type enum used during parsing.
+///
+/// This enum is not meant to be used outside the parser and type checker
+/// as it simply denotes the structure of the type rather than any type
+/// space the type occupies.
+#[derive(Debug, PartialEq)]
+pub enum ParsedType {
+    BaseType(String),
+    Tuple(Vec<Box<ParsedType>>),
+    Function(Box<ParsedType>, Box<ParsedType>),
+}
+
 #[derive(Debug,PartialEq,Clone,Copy)]
 pub enum BOp {
     Add,
@@ -65,11 +77,13 @@ pub enum Expr {
     // },
     Def {
         name: String,
+        typ: ParsedType,
         value: Box<Expr>,
 
     },
     DefMut {
         name: String,
+        typ: ParsedType,
         value: Box<Expr>,
     },
     App {

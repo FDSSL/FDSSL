@@ -1,6 +1,7 @@
 use crate::syntax;
 
 use syntax::Expr;
+use syntax::ParsedType;
 use syntax::BOp;
 use syntax::UOp;
 extern crate itertools;
@@ -11,7 +12,6 @@ use std::collections::HashMap;
 extern crate nom;
 use nom::bytes::complete::{is_not, tag};
 use nom::character::complete::{char, alpha1, alphanumeric1, i32, multispace0, space0, space1, line_ending, not_line_ending, digit1};
-use nom::{Needed};
 use nom::{IResult};
 use nom::branch::alt;
 use nom::multi::{many0, many1, separated_list0, separated_list1};
@@ -80,6 +80,20 @@ fn parse_ref(i: &str) -> IResult<&str, Expr> {
     map(preceded(space0, verify(name, |s : &str| !is_keyword(s))), |s: &str| Expr::Ref(s.to_string()))(i)
 }
 
+/// Parses an immutable definition
+/// Constitutes a binding of a name to an expr
+fn parse_def(input: &str) -> IResult<&str, Expr> {
+    let (input, (name,_,_,_,t,_,_,expr)) = tuple((name_str, space0, char(':'), space0, parse_type, space0, char('='), parse_expr))(input)?;
+    Ok((input, Expr::Def{name: name, typ: t, value: Box::new(expr)}))
+}
+
+/// Parses a mutable definition
+/// Constitutes a dynamic binding of a name to an expr, which can be changed at runtime
+fn parse_mutdef(input: &str) -> IResult<&str, Expr> {
+    let (input, (name,_,_,_,_,_,t,_,_,expr)) = tuple((name_str, space0, char(':'), space0, tag("mut"), space0, parse_type, space0, char('='), parse_expr))(input)?;
+    Ok((input, Expr::DefMut{name: name, typ: t, value: Box::new(expr)}))
+}
+
 // Parses a Boolean value w/ optional leading space
 fn parse_bool(input: &str) -> IResult<&str, Expr> {
     let vp1 = verify(preceded(space0, name), |s: &str| s == "true" || s == "false");
@@ -99,18 +113,6 @@ fn parse_return(i: &str) -> IResult<&str, Expr> {
         ),
         |expr: Expr| Expr::Return(Box::new(expr))
     )(i)
-}
-
-/// ParsedType is a structural type enum used during parsing.
-///
-/// This enum is not meant to be used outside the parser and type checker
-/// as it simply denotes the structure of the type rather than any type
-/// space the type occupies.
-#[derive(Debug, PartialEq)]
-enum ParsedType {
-    BaseType(String),
-    Tuple(Vec<Box<ParsedType>>),
-    Function(Box<ParsedType>, Box<ParsedType>),
 }
 
 /// parse_type_function parses the Function Type annotation.
@@ -228,12 +230,12 @@ fn parse_app(input: &str) -> IResult<&str, Expr> {
 /// Parses scoped expressions, as part of a function body or parametrized expression
 fn parse_scoped_exprs(input: &str) -> IResult<&str, Vec<Expr>> {
     // parse to the end of a line
-    let parseToEOL  = preceded(space0, line_ending);
+    let parse_to_eol    = preceded(space0, line_ending);
     // parse as many singular line separated exprs as we can find, works as long as there is 1 more expr to parse
     // using many1 to consume multiple linebreaks between exprs, if present
-    let pblock      = many0(terminated(parse_expr, terminated(many1(parseToEOL), peek(parse_expr))));
+    let pblock          = many0(terminated(parse_expr, terminated(many1(parse_to_eol), peek(parse_expr))));
     // parse the block, and then parse the leftover expr as well (we're guaranteed 1 leftover expr at this point, if it's a valid abstraction)
-    let pbody       = tuple((pblock,parse_expr));
+    let pbody           = tuple((pblock,parse_expr));
     let (input,(mut el,e)) = delimited(preceded(multispace0, terminated(char('{'), multispace0)), pbody, preceded(multispace0, char('}')))(input)?;
     // add the straggler expr to our Vec of exprs
     el.push(e);
@@ -318,6 +320,8 @@ fn parse_named_vect(input: &str) -> IResult<&str, Expr> {
     );
     map(p, |s: Vec<(String,Expr)>| Expr::NamedVect(s))(input)
 }
+
+
 /// parse_binop parses all the binary operators in the language.
 fn parse_binop(i: &str) -> IResult<&str, BOp> {
     // I wanted to use this list of tuple constructtion to make it easier to edit
@@ -390,109 +394,18 @@ fn parse_expr(input: &str) -> IResult<&str, Expr> {
         parse_app,
         parse_branch,
         parse_forloop,
+        parse_def,
         parse_ref,
-        // TODO parse forLoop:  for,(parse_expr x 3),{,parse_expr*,}
         //parse_bin_expr,
-        //parse_unary_expr,
         // TODO parse binOp:    parse_expr,parse_binop,parse_expr
-        // TODO parse def:      parse_ref,':',parse_type,'=',parse_expr
         // TODO parse mutDef:   parse_ref,':','mut',parse_type,'=',parse_expr
-        // TODO NO parsing functions...we get them for free w/ def/mutDef
     ))(input)
 }
 
-
-pub fn program(i: &str) -> IResult<&str, &str> {
-    function(i)
-}
-
-fn function(input: &str) -> IResult<&str, &str> {
-    let (input, id) = name(input)?;
-
-    let (input, _) = space1(input)?;
-
-    let (input, params) = parens(input)?;
-
-    let (_, params) = parameters(params)?;
-
-    let (input, _) = delimited(space1, tag("->"), space1)(input)?;
-
-    let (input, rets) = parens(input)?;
-
-    let (_, rets) = separated_list0(tag(", "), name)(rets)?;
-
-    let (input, _) = multispace0(input)?;
-
-    let (input, block) = nested_parens(input, "{", "}")?;
-
-    //let (input, params) = parameters(input);
-    println!("Parameters");
-    for (a, b) in params {
-        println!("{}, {}", a, b);
-    }
-    println!("Return Values");
-    for a in rets {
-        println!("{}", a);
-    }
-
-    Ok((input, id))
-}
-
-fn is_braces(input: char) -> bool {
-    match input {
-        '{' => true,
-        '}' => true,
-        _ => false,
-    }
-}
-
-// TODO This needs to support blocks within blocks
-fn nested_parens<'a>(input: &'a str, start: &str, end: &str) -> IResult<&'a str, &'a str> {
-    let mut level = 0;
-    let chunks: Vec<&str> = Vec::new();
-    // From what I understand from the documentation, this does not Err
-    // https://docs.rs/nom/latest/nom/bytes/complete/fn.take_till.html
-    loop {
-        let (input, matched) = many1(alt((is_not(start), is_not(end))))(input)?;
-        println!("{}", input);
-        for e in matched {
-            println!("{}", e);
-        }
-        if input == "" {
-            break;
-        }
-
-        //chunks.push(matched);
-        match input.chars().nth(0) {
-            start => {
-                level += 1;
-                println!("Open");
-            }
-            end => {
-                level -= 1;
-                println!("close");
-            }
-        }
-
-        if level == 0 {
-            break;
-        }
-    }
-    if level != 0 {
-        Err(nom::Err::Incomplete(Needed::new(4)))
-    } else {
-        Ok((input, ""))
-    }
-}
-
-fn parens(input: &str) -> IResult<&str, &str> {
-    delimited(tag("("), is_not(")"), tag(")"))(input)
-}
-
-fn parameters(input: &str) -> IResult<&str, Vec<(&str, &str)>> {
-    let param = separated_pair(name, tag(": "), name);
-
-    separated_list0(tag(", "), param)(input)
+/// Parses an FDSSL program, returning a vector of exprs
+pub fn program(i: &str) -> IResult<&str, Vec<Expr>> {
+    // parse 1 or more exprs, then new line, until end of program
+    many1(terminated(parse_expr, tuple((space0, line_ending))))(i)
 }
 
 /****************
@@ -656,11 +569,34 @@ fn test_parse_return() {
     //assert_eq!(parse_expr("returnsdf").is_ok(), false, "Failed to reject 'returnsdf'");
 }
 
+/// Helper function to build a simple parsed type for testing
+fn ptype(name: &str) -> ParsedType {
+    ParsedType::BaseType(name.to_string())
+}
+
+/// Used during testing to build an immutable def
+fn def(name: &str, typ: ParsedType, val: Expr) -> Expr {
+    Expr::Def{
+        name: name.to_string(),
+        typ: typ,
+        value: Box::new(val)
+    }
+}
+
+/// Used during testing to build a mutable def
+// fn mut_def(input: &str) -> Expr {
+//
+// }
+
 /// Tests parsing an immutable def
 #[test]
 fn test_parse_def() {
-    // TODO .....
-    assert!(false, "Immutable Def tests not implemented yet!");
+    assert_eq!(
+        parse_expr("a : int = 2"),
+        Ok(("", def("a", ptype("int"), i(2)))),
+        "Failed to parse simple def"
+    );
+
 }
 
 #[test]
