@@ -399,9 +399,7 @@ fn parse_expr(input: &str) -> IResult<&str, Expr> {
         parse_branch,
         parse_forloop,
         parse_ref,
-        // TODO parse forLoop:  for,(parse_expr x 3),{,parse_expr*,}
-        //parse_bin_expr,
-        //parse_unary_expr,
+        parse_binexpr,
         // TODO parse binOp:    parse_expr,parse_binop,parse_expr
         // TODO parse def:      parse_ref,':',parse_type,'=',parse_expr
         // TODO parse mutDef:   parse_ref,':','mut',parse_type,'=',parse_expr
