@@ -351,7 +351,7 @@ fn parse_binop(i: &str) -> IResult<&str, BOp> {
     let assoc = HashMap::from(tups);
 
     // Collect the binop tokens into a vector so we can transform them into parsers.
-    let keys: Vec<_> = tups.iter().map(|(s, _): &(&str,BOp)| tag(*s)).collect();
+    let keys: Vec<_> = assoc.clone().into_keys().map(|s: &str| tag(s)).collect();
 
     // We need to break this up into two tuples because `collect_tuple` only collects
     // up to 12 element tuples, and we have 17 elements. The reason we need to collect
