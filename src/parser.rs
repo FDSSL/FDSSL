@@ -10,14 +10,15 @@ use itertools::Itertools;
 use std::collections::HashMap;
 
 extern crate nom;
-use nom::bytes::complete::{is_not, tag};
+
+use nom::bytes::complete::{tag};
 use nom::character::complete::{char, alpha1, alphanumeric1, i32, multispace0, space0, space1, line_ending, not_line_ending, digit1};
 use nom::{IResult};
 use nom::branch::alt;
 use nom::multi::{many0, many1, separated_list0, separated_list1};
 use nom::sequence::{preceded, delimited, terminated, separated_pair, tuple, pair};
 use nom::number::complete::{float, double};
-use nom::combinator::{map, verify, recognize, peek, opt, fail, not};
+use nom::combinator::{map, verify, recognize, peek, opt, fail, not, eof};
 
 
 /// name parses any valid identifier, [_a-zA-Z][_a-zA-Z0-9]*
@@ -45,7 +46,9 @@ fn name_str(i: &str) -> IResult<&str, String> {
 /// Parses an int, corresponding to a 32-bit int in Rust.
 /// Can be surrounded by spaces on either end
 fn parse_int(input: &str) -> IResult<&str, Expr> {
-    map(delimited(space0, i32, not(alt((alpha1, tag("_"))))), |i: i32| Expr::I(i))(input)
+    println!("* Attempting to parse int: {}", input);
+    //map(delimited(space0, i32, not(alt((alpha1, tag("_"))))), |i: i32| Expr::I(i))(input)
+    map(preceded(space0, i32), |i: i32| Expr::I(i))(input)
 }
 
 /// parse_float parses a 32-bit floating point value, preceded by 0+ spaces.
@@ -83,14 +86,16 @@ fn parse_ref(i: &str) -> IResult<&str, Expr> {
 /// Parses an immutable definition
 /// Constitutes a binding of a name to an expr
 fn parse_def(input: &str) -> IResult<&str, Expr> {
-    let (input, (name,_,_,_,t,_,_,expr)) = tuple((name_str, space0, char(':'), space0, parse_type, space0, char('='), parse_expr))(input)?;
+    println!("* Attempting to parse a definition");
+    let (input, (_,name,_,_,_,t,_,_,expr)) = tuple((delimited(space0,tag("let"),space1),name_str, space0, char(':'), space0, parse_type, space0, char('='), parse_expr))(input)?;
+    println!("* Definition parsed out...");
     Ok((input, Expr::Def{name: name, typ: t, value: Box::new(expr)}))
 }
 
 /// Parses a mutable definition
 /// Constitutes a dynamic binding of a name to an expr, which can be changed at runtime
 fn parse_mutdef(input: &str) -> IResult<&str, Expr> {
-    let (input, (name,_,_,_,_,_,t,_,_,expr)) = tuple((name_str, space0, char(':'), space0, tag("mut"), space0, parse_type, space0, char('='), parse_expr))(input)?;
+    let (input, (_,name,_,_,_,_,_,t,_,_,expr)) = tuple((delimited(space0,tag("let"),space1), name_str, space0, char(':'), space0, tag("mut"), space0, parse_type, space0, char('='), parse_expr))(input)?;
     Ok((input, Expr::DefMut{name: name, typ: t, value: Box::new(expr)}))
 }
 
@@ -121,10 +126,13 @@ fn parse_return(i: &str) -> IResult<&str, Expr> {
 /// is any type annotation. This allows the type annotation to nest other
 /// structural types. e.g. t1 -> `t1 -> (t2, t2)`
 fn parse_type_function(i: &str) -> IResult<&str, ParsedType> {
+    println!("* parse_type_func");
+    println!("{}", i);
     map(
         tuple((
-            parse_type,
-            delimited(space1, tag("->"), space1),
+            terminated(parse_type, tuple((space1, tag("->")))),
+            //delimited(space1, tag("->"), space1),
+            space1,
             parse_type,
         )),
         |(t1, _, t2): (ParsedType, &str, ParsedType)| ParsedType::Function(Box::new(t1), Box::new(t2))
@@ -137,6 +145,7 @@ fn parse_type_function(i: &str) -> IResult<&str, ParsedType> {
 /// is any type annotation. This allows the type annotation to nest other
 /// structural types. e.g. (t1, (t2, t3), t1 -> t2)
 fn parse_type_tuple(i: &str) -> IResult<&str, ParsedType> {
+    println!("* parse_type_tuple");
     let mut parser =
         verify(
             delimited(
@@ -164,6 +173,7 @@ fn parse_type_tuple(i: &str) -> IResult<&str, ParsedType> {
 /// so we simply save it.
 // TODO perhaps type names should be more limited than reference names
 fn parse_type_base(i: &str) -> IResult<&str, ParsedType> {
+    println!("* parse_type_base");
     map(name, |n: &str| ParsedType::BaseType(n.to_string()))(i)
 }
 
@@ -176,6 +186,7 @@ fn parse_type_base(i: &str) -> IResult<&str, ParsedType> {
 /// variable rather than the type of the value it represents.
 fn parse_type(i: &str) -> IResult<&str, ParsedType> {
     let (i, _) = space0(i)?;
+    println!("* parse_type");
     alt((
         parse_type_base,
         parse_type_tuple,
@@ -334,13 +345,15 @@ fn parse_binop(i: &str) -> IResult<&str, BOp> {
     // type annotation when we collect into tuples, but that's relatively easy
     // to fix and not prone to mispellings.
     let tups = [
+        ("&&", BOp::And),
+        ("||", BOp::Or),
         ("+",  BOp::Add),
         ("-",  BOp::Sub),
         ("*",  BOp::Mul),
         ("/",  BOp::Div),
         ("%",  BOp::Mod),
-        ("&&", BOp::And),
-        ("||", BOp::Or),
+        ("&",  BOp::BitAnd),
+        ("|",  BOp::BitOr),
         (".",  BOp::Compose),
         ("==", BOp::Eq),
         ("!=", BOp::Neq),
@@ -348,8 +361,6 @@ fn parse_binop(i: &str) -> IResult<&str, BOp> {
         ("<=", BOp::Lte),
         (">",  BOp::Gt),
         ("<",  BOp::Lt),
-        ("&",  BOp::BitAnd),
-        ("|",  BOp::BitOr),
         ("^",  BOp::BitXor),
     ];
     let assoc = HashMap::from(tups);
@@ -373,38 +384,52 @@ fn parse_binop(i: &str) -> IResult<&str, BOp> {
 
 fn parse_binexpr(i: &str) -> IResult<&str, Expr> {
     let (i, _) = space0(i)?;
-    map(
-        tuple((
-            parse_expr,
-            parse_binop,
-            parse_expr,
-        )),
-        |(e1, o, e2): (Expr, BOp, Expr)| Expr::BinOp{operator: o, e1: Box::new(e1), e2: Box::new(e2)}
-    )(i)
+    if i == "" {
+        // do not try to parse binary exprs when we've exhausted our input
+        // TODO: This is a hack, needs to be removed when redesigning
+        fail(i)
+
+    } else {
+        // std. binop check
+        map(
+            tuple((
+                terminated(parse_expr, peek(parse_binop)),
+                parse_binop,
+                parse_expr,
+            )),
+            |(e1, o, e2): (Expr, BOp, Expr)| Expr::BinOp{operator: o, e1: Box::new(e1), e2: Box::new(e2)}
+        )(i)
+    }
 }
 
 
 /// Parses a standalone expression
 /// Represents all possible expansions for parsing exprs
 fn parse_expr(input: &str) -> IResult<&str, Expr> {
+    println!("* Running the Expr Parser...");
+
     alt((
         parse_float,
         parse_double,
         parse_int,
+
         parse_unary_expr,
         parse_bool,
         parse_comment,
-        parse_nested_expr,
         parse_named_vect,
+        parse_nested_expr,
         parse_abs,
         parse_vect,
+
         parse_return,
         parse_app,
         parse_branch,
         parse_forloop,
+
         parse_def,
         parse_ref,
-        parse_binexpr,
+        //parse_binexpr,
+
         // TODO parse binOp:    parse_expr,parse_binop,parse_expr
         // TODO parse mutDef:   parse_ref,':','mut',parse_type,'=',parse_expr
     ))(input)
@@ -413,7 +438,30 @@ fn parse_expr(input: &str) -> IResult<&str, Expr> {
 /// Parses an FDSSL program, returning a vector of exprs
 pub fn program(i: &str) -> IResult<&str, Vec<Expr>> {
     // parse 1 or more exprs, then new line, until end of program
-    many1(terminated(parse_expr, tuple((space0, line_ending))))(i)
+
+    // parse expr terminated by ...
+    // many1(terminated(parse_expr, alt((
+    //     // immediate EOF, allows us to enter a total accept state
+    //     tuple((space0, eof)),
+    //     // many spaces & line breaks followed by EOF
+    //     // also allows us to enter a total accept state
+    //     tuple((many1(tuple((space0, line_ending))), eof)),
+    //     // normal end of line
+    //     tuple((space0, line_ending))
+    // ))))(i)
+
+
+    /*
+    1st try to parse many exprs followed by
+    2nd try to parse to a line break
+    3rd try to
+    */
+
+    terminated(
+        many1(terminated(parse_expr, tuple((space0, line_ending)))),
+        tuple((multispace0, eof))
+        //many0(tuple((space0, line_ending)))
+    )(i)
 }
 
 /****************
@@ -600,7 +648,7 @@ fn def(name: &str, typ: ParsedType, val: Expr) -> Expr {
 #[test]
 fn test_parse_def() {
     assert_eq!(
-        parse_expr("a : int = 2"),
+        parse_expr("let a : int = 2"),
         Ok(("", def("a", ptype("int"), i(2)))),
         "Failed to parse simple def"
     );
@@ -670,6 +718,7 @@ fn app(name: &str, args: Vec<Expr>) -> Expr {
     Expr::App{fname: name.to_string(), arguments: args}
 }
 
+// Used to quickly wrap an integer for use
 fn i(v: i32) -> Expr {
     Expr::I(v)
 }
