@@ -2,24 +2,33 @@ use crate::syntax;
 
 use syntax::Expr;
 use syntax::ParsedType;
+use syntax::AccessType;
 use syntax::BOp;
 use syntax::UOp;
 extern crate itertools;
 use itertools::Itertools;
-
-use std::collections::HashMap;
 
 extern crate nom;
 
 use nom::bytes::complete::{tag};
 use nom::character::complete::{char, alpha1, alphanumeric1, i32, multispace0, space0, space1, line_ending, not_line_ending, digit1};
 use nom::{IResult};
+use nom::character::is_alphabetic;
 use nom::branch::alt;
 use nom::multi::{many0, many1, separated_list0, separated_list1};
 use nom::sequence::{preceded, delimited, terminated, separated_pair, tuple, pair};
 use nom::number::complete::{float, double};
 use nom::combinator::{map, verify, recognize, peek, opt, fail, not, eof};
 
+
+#[macro_export]
+macro_rules! bop {
+    ( $i:expr , $b:expr) => {
+        {
+            map(tag($i), |s: &str| $b)
+        }
+    };
+}
 
 /// name parses any valid identifier, [_a-zA-Z][_a-zA-Z0-9]*
 ///
@@ -46,9 +55,7 @@ fn name_str(i: &str) -> IResult<&str, String> {
 /// Parses an int, corresponding to a 32-bit int in Rust.
 /// Can be surrounded by spaces on either end
 fn parse_int(input: &str) -> IResult<&str, Expr> {
-    println!("* Attempting to parse int: {}", input);
-    //map(delimited(space0, i32, not(alt((alpha1, tag("_"))))), |i: i32| Expr::I(i))(input)
-    map(preceded(space0, i32), |i: i32| Expr::I(i))(input)
+    map(delimited(space0, i32, not(alt((alpha1, tag("_"))))), |i: i32| Expr::I(i))(input)
 }
 
 /// parse_float parses a 32-bit floating point value, preceded by 0+ spaces.
@@ -78,24 +85,50 @@ fn is_keyword(s: &str) -> bool {
     return keywords.contains(&s)
 }
 
-/// parse_ref parses a reference, which is defined by the `name` parser, see `name`
+/// Parses a reference, which is defined by the `name` parser, see `name`
 fn parse_ref(i: &str) -> IResult<&str, Expr> {
     map(preceded(space0, verify(name, |s : &str| !is_keyword(s))), |s: &str| Expr::Ref(s.to_string()))(i)
 }
 
+
+/// Parses named access of a reference
+fn parse_named_access(i: &str) -> IResult<&str, Expr> {
+    // parse name, followed by '.' and then another name
+    let (i,(n,_,a)) = tuple((
+        preceded(space0, name),
+        preceded(space0, tag(".")),
+        preceded(space0, name)
+    ))(i)?;
+    Ok((i, Expr::Access(n.to_string(), AccessType::Name(a.to_string()))))
+}
+
+
+/// Parses indexed access of a reference
+fn parse_index_access(i: &str) -> IResult<&str, Expr> {
+    // parse name followed by an expr wrapped in square brackets
+    let (i,(n,e)) = tuple((
+        preceded(space0, name),
+        delimited(
+            preceded(space0, tag("[")),
+            parse_expr,
+            preceded(space0, tag("]"))
+        )
+    ))(i)?;
+    Ok((i, Expr::Access(n.to_string(), AccessType::Idx(Box::new(e)))))
+}
+
+
 /// Parses an immutable definition
 /// Constitutes a binding of a name to an expr
 fn parse_def(input: &str) -> IResult<&str, Expr> {
-    println!("* Attempting to parse a definition");
-    let (input, (_,name,_,_,_,t,_,_,expr)) = tuple((delimited(space0,tag("let"),space1),name_str, space0, char(':'), space0, parse_type, space0, char('='), parse_expr))(input)?;
-    println!("* Definition parsed out...");
+    let (input, (_,name,_,_,_,t,_,_,expr)) = tuple((delimited(space0,tag("let"),space1), name_str, space0, char(':'), space0, parse_type, space0, char('='), parse_expr))(input)?;
     Ok((input, Expr::Def{name: name, typ: t, value: Box::new(expr)}))
 }
 
 /// Parses a mutable definition
 /// Constitutes a dynamic binding of a name to an expr, which can be changed at runtime
 fn parse_mutdef(input: &str) -> IResult<&str, Expr> {
-    let (input, (_,name,_,_,_,_,_,t,_,_,expr)) = tuple((delimited(space0,tag("let"),space1), name_str, space0, char(':'), space0, tag("mut"), space0, parse_type, space0, char('='), parse_expr))(input)?;
+    let (input, (_,name,_,_,_,t,_,_,expr)) = tuple((delimited(space0,tag("mut"),space1), name_str, space0, char(':'), space0, parse_type, space0, char('='), parse_expr))(input)?;
     Ok((input, Expr::DefMut{name: name, typ: t, value: Box::new(expr)}))
 }
 
@@ -120,24 +153,6 @@ fn parse_return(i: &str) -> IResult<&str, Expr> {
     )(i)
 }
 
-/// parse_type_function parses the Function Type annotation.
-///
-/// This function parses type annotations of the form type -> type where `type`
-/// is any type annotation. This allows the type annotation to nest other
-/// structural types. e.g. t1 -> `t1 -> (t2, t2)`
-fn parse_type_function(i: &str) -> IResult<&str, ParsedType> {
-    println!("* parse_type_func");
-    println!("{}", i);
-    map(
-        tuple((
-            terminated(parse_type, tuple((space1, tag("->")))),
-            //delimited(space1, tag("->"), space1),
-            space1,
-            parse_type,
-        )),
-        |(t1, _, t2): (ParsedType, &str, ParsedType)| ParsedType::Function(Box::new(t1), Box::new(t2))
-    )(i)
-}
 
 /// parse_type_function parses the Tuple Type annotation.
 ///
@@ -145,7 +160,6 @@ fn parse_type_function(i: &str) -> IResult<&str, ParsedType> {
 /// is any type annotation. This allows the type annotation to nest other
 /// structural types. e.g. (t1, (t2, t3), t1 -> t2)
 fn parse_type_tuple(i: &str) -> IResult<&str, ParsedType> {
-    println!("* parse_type_tuple");
     let mut parser =
         verify(
             delimited(
@@ -173,9 +187,9 @@ fn parse_type_tuple(i: &str) -> IResult<&str, ParsedType> {
 /// so we simply save it.
 // TODO perhaps type names should be more limited than reference names
 fn parse_type_base(i: &str) -> IResult<&str, ParsedType> {
-    println!("* parse_type_base");
     map(name, |n: &str| ParsedType::BaseType(n.to_string()))(i)
 }
+
 
 /// parse_type is the root of the Type annotation parser.
 ///
@@ -186,12 +200,58 @@ fn parse_type_base(i: &str) -> IResult<&str, ParsedType> {
 /// variable rather than the type of the value it represents.
 fn parse_type(i: &str) -> IResult<&str, ParsedType> {
     let (i, _) = space0(i)?;
-    println!("* parse_type");
-    alt((
-        parse_type_base,
-        parse_type_tuple,
-        parse_type_function,
-    ))(i)
+
+    let c : char = (*i).chars().nth(0).unwrap();
+
+    if is_alphabetic(c as u8) || c == '_' {
+        // parse a base type
+        let (i,t) = parse_type_base(i)?;
+        let (i,_) = space0(i)?;
+
+        let c1 = (*i).chars().nth(0);
+        let c2 = (*i).chars().nth(1);
+
+        match (c1,c2) {
+            (Some('-'),Some('>')) => {
+                // parse again, and build function type w/ these 2 types
+                let (i,t2) = preceded(tuple((space0,tag("->"))), parse_type)(i)?;
+                Ok((
+                    i,
+                    ParsedType::Function(
+                        Box::new(t),
+                        Box::new(t2)
+                    )
+                ))
+            }
+            (_,_)                 => Ok((i,t))
+        }
+
+    } else if c == '(' {
+        // parse a tuple type
+        let (i,t) = parse_type_tuple(i)?;
+        let (i,_) = space0(i)?;
+
+        let c1 = (*i).chars().nth(0);
+        let c2 = (*i).chars().nth(1);
+
+        match (c1,c2) {
+            (Some('-'),Some('>')) => {
+                // parse again, and build function type w/ these 2 types
+                let (i,t2) = preceded(tuple((space0,tag("->"))), parse_type)(i)?;
+                Ok((
+                    i,
+                    ParsedType::Function(
+                        Box::new(t),
+                        Box::new(t2)
+                    )
+                ))
+            }
+            (_,_)                 => Ok((i,t))
+        }
+
+    } else {
+        fail(i)
+    }
 }
 // Parses a comment, which is a valid element in our abstract syntax
 // Comments are transformed from FDSSL to match the equivalent GLSL produced
@@ -286,19 +346,10 @@ fn parse_unary_expr(input: &str) -> IResult<&str, Expr> {
 
 /// Parses a unary expression
 fn parse_unary_op(input: &str) -> IResult<&str, UOp> {
-    // recognize a unary operator
-    let unary_pairs = [
-        ("-",  UOp::Negative),
-        ("!", UOp::Negate)
-    ];
-    let assoc = HashMap::from(unary_pairs);
-    // put it ahead of a standard expr
-
-    let keys: Vec<_> = unary_pairs.iter().map(|(s, _): &(&str,UOp)| tag(*s)).collect();
-    let parse_uop: (_,_) = keys[0..].iter().collect_tuple().unwrap();
-
-    let (i, out) = preceded(space0, alt(parse_uop))(input)?;
-    Ok((i, assoc[out]))
+    preceded(space0, alt((
+        map(tag("-"), |s: &str| UOp::Negative),
+        map(tag("!"), |s: &str| UOp::Negate),
+    )))(input)
 }
 
 /// Parses a branch
@@ -339,76 +390,33 @@ fn parse_named_vect(input: &str) -> IResult<&str, Expr> {
 
 /// parse_binop parses all the binary operators in the language.
 fn parse_binop(i: &str) -> IResult<&str, BOp> {
-    let (i, _) = space0(i)?;
-    // I wanted to use this list of tuple constructtion to make it easier to edit
-    // the total number of binary operators. Unfortunately this shows up in the
-    // type annotation when we collect into tuples, but that's relatively easy
-    // to fix and not prone to mispellings.
-    let tups = [
-        ("&&", BOp::And),
-        ("||", BOp::Or),
-        ("+",  BOp::Add),
-        ("-",  BOp::Sub),
-        ("*",  BOp::Mul),
-        ("/",  BOp::Div),
-        ("%",  BOp::Mod),
-        ("&",  BOp::BitAnd),
-        ("|",  BOp::BitOr),
-        (".",  BOp::Compose),
-        ("==", BOp::Eq),
-        ("!=", BOp::Neq),
-        (">=", BOp::Gte),
-        ("<=", BOp::Lte),
-        (">",  BOp::Gt),
-        ("<",  BOp::Lt),
-        ("^",  BOp::BitXor),
-    ];
-    let assoc = HashMap::from(tups);
+    preceded(space0, alt((
+        bop!("&&", BOp::And),
+        bop!("||", BOp::Or),
+        bop!("&",  BOp::BitAnd),
+        bop!("|",  BOp::BitOr),
+        bop!("+",  BOp::Add),
+        bop!("-",  BOp::Sub),
+        bop!("*",  BOp::Mul),
+        bop!("/",  BOp::Div),
+        bop!("%",  BOp::Mod),
+        bop!(".",  BOp::Compose),
+        bop!("==", BOp::Eq),
+        bop!("!=", BOp::Neq),
+        bop!(">=", BOp::Gte),
+        bop!("<=", BOp::Lte),
+        bop!(">",  BOp::Gt),
+        bop!("<",  BOp::Lt),
+        bop!("^",  BOp::BitXor),
+    )))(i)
 
-    // Collect the binop tokens into a vector so we can transform them into parsers.
-    let keys: Vec<_> = assoc.clone().into_keys().map(|s: &str| tag(s)).collect();
-
-    // We need to break this up into two tuples because `collect_tuple` only collects
-    // up to 12 element tuples, and we have 17 elements. The reason we need to collect
-    // them into tuples is because `alt` only takes tuples. If we could collect up to
-    // 17 into a tuple, then this wouldn't be needed.
-    let l: (_,_,_,_,_,_,_,_,_) = keys[0..9].iter().collect_tuple().unwrap();
-    let r: (_,_,_,_,_,_,_,_)   = keys[9..] .iter().collect_tuple().unwrap();
-
-    // This pattern is recommended if you have >21 parsers to work with, but here
-    // we are doing it because we can't collect into a tuple large enough to fit
-    // all of the binop parsers
-    let (i, out) = alt((alt(l), alt(r)))(i)?;
-    Ok((i, assoc[out]))
-}
-
-fn parse_binexpr(i: &str) -> IResult<&str, Expr> {
-    let (i, _) = space0(i)?;
-    if i == "" {
-        // do not try to parse binary exprs when we've exhausted our input
-        // TODO: This is a hack, needs to be removed when redesigning
-        fail(i)
-
-    } else {
-        // std. binop check
-        map(
-            tuple((
-                terminated(parse_expr, peek(parse_binop)),
-                parse_binop,
-                parse_expr,
-            )),
-            |(e1, o, e2): (Expr, BOp, Expr)| Expr::BinOp{operator: o, e1: Box::new(e1), e2: Box::new(e2)}
-        )(i)
-    }
 }
 
 
 /// Parses a standalone expression
 /// Represents all possible expansions for parsing exprs
 fn parse_expr(input: &str) -> IResult<&str, Expr> {
-    println!("* Running the Expr Parser...");
-
-    alt((
+    let (i,e) = alt((
         parse_float,
         parse_double,
         parse_int,
@@ -417,8 +425,12 @@ fn parse_expr(input: &str) -> IResult<&str, Expr> {
         parse_bool,
         parse_comment,
         parse_named_vect,
-        parse_nested_expr,
+
+        // Abs vs. Nested Exprs are position sensitive
+        // Nested Exprs must be checked after Abs, or abstractions will
+        // be mangled before they can be checked
         parse_abs,
+        parse_nested_expr,
         parse_vect,
 
         parse_return,
@@ -427,12 +439,27 @@ fn parse_expr(input: &str) -> IResult<&str, Expr> {
         parse_forloop,
 
         parse_def,
+        parse_mutdef,
+        parse_named_access,
+        parse_index_access,
         parse_ref,
-        //parse_binexpr,
+    ))(input)?;
 
-        // TODO parse binOp:    parse_expr,parse_binop,parse_expr
-        // TODO parse mutDef:   parse_ref,':','mut',parse_type,'=',parse_expr
-    ))(input)
+    // Check to handle a potential binary expr afterwards
+    let p_bin = preceded(space0, parse_binop)(i);
+
+    if p_bin.is_ok() {
+        // decompose as a bin op
+        let (i,op) = p_bin?;
+        // parse another expr to append
+        let (i,e2) = parse_expr(i)?;
+
+        Ok((i,Expr::BinOp{operator: op, e1: Box::new(e), e2: Box::new(e2)}))
+
+    } else {
+        // no bin op, return as is
+        Ok((i,e))
+    }
 }
 
 /// Parses an FDSSL program, returning a vector of exprs
@@ -522,7 +549,8 @@ fn test_parse_doubles() {
     assert_eq!(parse_double("  0.98"), Ok(("", Expr::D(0.98))), "Failed to parse 0.98");
     assert_eq!(parse_double(" -5.2  "), Ok(("  ", Expr::D(-5.2))), "Failed to parse -5.2");
     assert_eq!(parse_double(" 12").is_ok(), false, "Double parser failed. Parsed an integer, 12");
-    assert!(!parse_double("1.5f").is_ok(), "Double parser did not stop short of parsing a float.");
+    // TODO dropping this test since we implicitly check for floats before doubles, this case won't come up (@montymxb)
+    //assert!(!parse_double("1.5f").is_ok(), "Double parser did not stop short of parsing a float.");
 }
 
 /// Tests parsing various refs
@@ -540,6 +568,7 @@ fn test_parse_refs() {
     assert_eq!(parse_expr("_c71_71"), Ok(("", Expr::Ref("_c71_71".to_string()))), "Failed to parse mixed ref w/ underscores");
     // verify you cannot parse with leading numbers
     assert!(!parse_expr("1_c71_71").is_ok(), "Failed to reject ref w/ leading digit");
+    //assert_eq!(parse_expr("1_c71_71"), Ok(("", Expr::Ref("_c71_71".to_string()))), "Failed to reject ref w/ leading digit");
     // verify you cannot parse w/ leading negative
     assert_eq!(parse_expr("-_c71_71"), Ok(("", Expr::UnaryOp{operator: UOp::Negative, e: Box::new(Expr::Ref("_c71_71".to_string()))})), "Failed to reject ref w/ leading dash");
     //assert_eq!(parse_expr("-_c71_71"), Ok(("", i(1))), "Failed to reject ref w/ leading dash");
@@ -640,9 +669,13 @@ fn def(name: &str, typ: ParsedType, val: Expr) -> Expr {
 }
 
 /// Used during testing to build a mutable def
-// fn mut_def(input: &str) -> Expr {
-//
-// }
+fn mdef(name: &str, typ: ParsedType, val: Expr) -> Expr {
+    Expr::DefMut{
+        name: name.to_string(),
+        typ: typ,
+        value: Box::new(val)
+    }
+}
 
 /// Tests parsing an immutable def
 #[test]
@@ -657,19 +690,35 @@ fn test_parse_def() {
 
 #[test]
 fn test_parse_type_base() {
-    assert_eq!(parse_type_base("int"), Ok(("", ParsedType::BaseType("int".to_string()))), "Failed to parse base type.");
+    assert_eq!(parse_type_base("int"), Ok(("", ptype("int"))), "Failed to parse base type.");
 }
 
 #[test]
 fn test_parse_type_function() {
-    assert_eq!(parse_type_function("int -> int"),
+    // test a simple function type
+    assert_eq!(parse_type("int -> int"),
                Ok(("",
                    ParsedType::Function(
-                       Box::new(ParsedType::BaseType("int".to_string())),
-                       Box::new(ParsedType::BaseType("int".to_string())),
+                       Box::new(ptype("int")),
+                       Box::new(ptype("int")),
                    ))
                ),
                "Failed to parse function type.");
+    // test a complex function type
+    assert_eq!(
+        parse_type("(int,bool) -> (A, B -> (C,D -> F))"),
+        Ok(("", ParsedType::Function(
+            Box::new(ParsedType::Tuple(vec![Box::new(ptype("int")), Box::new(ptype("bool"))])),
+            Box::new(ParsedType::Tuple(vec![Box::new(ptype("A")), Box::new(ParsedType::Function(
+                Box::new(ptype("B")),
+                Box::new(ParsedType::Tuple(vec![Box::new(ptype("C")), Box::new(ParsedType::Function(
+                    Box::new(ptype("D")),
+                    Box::new(ptype("F"))))]
+                ))
+            ))]))
+        ))),
+        "Failed to parse basic type"
+    );
 }
 
 
@@ -679,8 +728,8 @@ fn test_parse_type_tuple() {
                Ok(("",
                    ParsedType::Tuple(
                        vec![
-                           Box::new(ParsedType::BaseType("int".to_string())),
-                           Box::new(ParsedType::BaseType("int".to_string())),
+                           Box::new(ptype("int")),
+                           Box::new(ptype("int")),
                        ]
                     )
 
@@ -702,15 +751,15 @@ fn test_parse_type_tuple() {
     );
 }
 
-#[test]
-fn test_parse_type() {
-    assert!(false, "Complex type test not implemented");
-}
+
 /// Tests parsing a mutable def
 #[test]
 fn test_parse_defmut() {
-    // TODO .....
-    assert!(false, "Mutable Def tests not implemented yet!");
+    assert_eq!(
+        parse_expr("mut a : int = 2"),
+        Ok(("", mdef("a", ptype("int"), i(2)))),
+        "Failed to parse simple def"
+    );
 }
 
 // Used to generate a mock expr object for testing
@@ -755,10 +804,17 @@ fn test_parse_binop(){
 
 #[test]
 fn test_parse_binexp() {
-    assert_eq!(parse_binexpr("1 + 2").is_ok(),true, "Failed to parse binary expresssion");
-    assert_eq!(parse_binexpr("1+ 2").is_ok(),true, "Failed to parse binary expresssion");
-    assert_eq!(parse_binexpr("1 +2").is_ok(),true, "Failed to parse binary expresssion");
-    assert_eq!(parse_binexpr("1+2").is_ok(),true, "Failed to parse binary expresssion");
+    assert_eq!(
+        parse_expr("1 + 2"),
+        Ok(("", Expr::BinOp{
+            operator: BOp::Add,
+            e1: Box::new(Expr::I(1)),
+            e2: Box::new(Expr::I(2))
+        })),
+        "Failed to parse binary expresssion");
+    assert_eq!(parse_expr("1+ 2").is_ok(),true, "Failed to parse binary expresssion");
+    assert_eq!(parse_expr("1 +2").is_ok(),true, "Failed to parse binary expresssion");
+    assert_eq!(parse_expr("1+2").is_ok(),true, "Failed to parse binary expresssion");
 }
 
 /// Tests parsing a branch
@@ -769,10 +825,6 @@ fn test_parse_branch() {
     let mut b = Expr::Branch{condition: Box::new(app("verify", vec![Expr::B(false),Expr::B(true)])), b1: vec![i(1),i(2),Expr::B(true)], b2: vec![i(2),Expr::B(true)]};
     assert_eq!(parse_expr("if verify(false,true) { 1\n2\ntrue } else { 2\ntrue }"), Ok(("", b)), "Failed to parse more complex branch");
     assert_eq!(parse_expr("if oops(1,2) { 5 } else { 55").is_ok(), false, "Failed to discard badly formatted branch");
-
-    // TODO TESTING
-    // let mut b = Expr::Branch{condition: Box::new(Expr::B(true)), b1: vec![i(1)], b2: vec![i(2)]};
-    // assert_eq!(parse_expr("if oops(1,2) { 5 } else { 55"), Ok(("",b)), "Failed to discard badly formatted branch");
 }
 
 /// Tests parametrized abstractions
@@ -817,22 +869,87 @@ fn test_parse_unaryexpr() {
 /// Tests parsing an vect access by name
 #[test]
 fn test_parse_access_name() {
-    // TODO .....
-    // x['y']
-    assert!(false, "Access by Name tests not implemented yet!");
+    // simple access
+    assert_eq!(parse_expr("x.y"), Ok(("", Expr::Access("x".to_string(), AccessType::Name("y".to_string())))), "Failed to parse 1st simple named access.");
+    assert_eq!(parse_expr("x._y"), Ok(("", Expr::Access("x".to_string(), AccessType::Name("_y".to_string())))), "Failed to parse 2nd simple named access.");
+    assert_eq!(parse_expr("_X._Y"), Ok(("", Expr::Access("_X".to_string(), AccessType::Name("_Y".to_string())))), "Failed to parse 3rd simple named access.");
 }
 
 /// Tests parsing an vect access by index
 #[test]
 fn test_parse_access_index() {
-    // TODO .....
-    // x[0]
-    assert!(false, "Access by Index tests not implemented yet!");
+    assert_eq!(parse_expr("x[0]"), Ok(("", Expr::Access("x".to_string(), AccessType::Idx(Box::new(i(0)))))), "Failed to parse literal int for indexed access.");
+    assert_eq!(parse_expr("x[_y]"), Ok(("", Expr::Access("x".to_string(), AccessType::Idx(Box::new(Expr::Ref("_y".to_string())))))), "Failed to parse ref for indexed access.");
+    assert_eq!(parse_expr("xY_z[_y + 1]"), Ok(("", Expr::Access(
+        "xY_z".to_string(),
+        AccessType::Idx(Box::new(Expr::BinOp{
+            operator: BOp::Add,
+            e1:       Box::new(Expr::Ref("_y".to_string())),
+            e2:       Box::new(Expr::I(1))
+        }))))), "Failed to parse binary expr for indexed access.");
 }
 
 /// Tests parsing a func w/ body
 #[test]
 fn test_parse_func() {
-    // TODO .....
-    assert!(false, "Function parsing tests not implemented yet!");
+
+    // test func w/ no params
+    assert_eq!(
+        parse_expr("let f1 : bool = () { true }"),
+        Ok((
+            "",
+            Expr::Def{
+                name:   "f1".to_string(),
+                typ:    ptype("bool"),
+                value:  Box::new(Expr::Abs{
+                    params: vec![],
+                    body:   vec![Expr::B(true)]
+                })
+            }
+        )),
+        "Failed to parse f1 boolean function w/ no args"
+    );
+
+    assert_eq!(
+        parse_expr("let id : int -> int = (x) { x }"),
+        Ok((
+            "",
+            Expr::Def{
+                name:   "id".to_string(),
+                typ:    ParsedType::Function(Box::new(ptype("int")), Box::new(ptype("int"))),
+                value:  Box::new(Expr::Abs{
+                    params: vec!["x".to_string()],
+                    body:   vec![Expr::Ref("x".to_string())]
+                })
+            }
+        )),
+        "Failed to parse id 'int' function"
+    );
+
+    // add test
+    assert_eq!(
+        parse_expr("let add : (int,int) -> int = (_x,y) {\n_x + y\n}"),
+        Ok((
+            "",
+            Expr::Def{
+                name:   "add".to_string(),
+                // (int,int) -> int
+                typ:    ParsedType::Function(
+                    Box::new(ParsedType::Tuple(
+                        vec![Box::new(ptype("int")),
+                        Box::new(ptype("int"))])),
+                    Box::new(ptype("int"))),
+                // _x + y
+                value:  Box::new(Expr::Abs{
+                    params: vec!["_x".to_string(), "y".to_string()],
+                    body:   vec![Expr::BinOp{
+                        operator: BOp::Add,
+                        e1:       Box::new(Expr::Ref("_x".to_string())),
+                        e2:       Box::new(Expr::Ref("y".to_string())),
+                    }]
+                })
+            }
+        )),
+        "Failed to parse inc function"
+    )
 }

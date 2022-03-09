@@ -59,7 +59,7 @@ pub struct Parameter {
 #[derive(Debug,PartialEq)]
 pub enum AccessType {
     Name(String),
-    Idx(usize),
+    Idx(Box<Expr>)
 }
 
 #[derive(Debug,PartialEq)]
@@ -117,12 +117,6 @@ pub enum Expr {
     },
     Access(String, AccessType),
     Comment(Vec<String>),
-    Func {
-        name: String,
-        parameters: Vec<Parameter>,
-        return_type: Vec<Parameter>,
-        body: Vec<Expr>,
-    },
     // parameterized abstraction
     Abs {
         params: Vec<String>,

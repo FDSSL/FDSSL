@@ -4,19 +4,18 @@ mod parser;
 use parser::program;
 
 fn main() {
-    println!("Trying here?");
-    // let prog = "\
-    // laksjd (a: tru, b: a) -> (a, b) { \
-    // kjsd {{{{}{pd{kdfj}kjd} }}}} {} {}";
-    // let res = match program(prog) {
-    //     Ok((_, a)) => a,
-    //     _          => vec![]
-    // };
-    // println!("{:?}", res);
+    let prog = "\
+    let swap : (a, b) -> (b, a) = (x,y) { \
+        (y,x)\
+    }\n";
+    let res = match program(prog) {
+        Ok((_, a)) => a,
+        _          => vec![]
+    };
+    println!("{:?}", res);
 
-    //let r2 = program("(x:1, y:2)");
-    let r2 = program("1\n1\n2\n");
-
+    let r1 = program("(x:1, y:2)");
+    let r2 = program("1+1\n");
     println!("{:?}", r2);
 
 //     let x = DefMut {
