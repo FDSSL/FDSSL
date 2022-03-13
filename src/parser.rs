@@ -205,13 +205,14 @@ fn parse_type(i: &str) -> IResult<&str, ParsedType> {
 
     let (i, r) = preceded(space0, opt(tag("->")))(i)?;
 
-    if r.is_some() {
+    let t3 = if r.is_some() {
         let(i, t2) = preceded(space0, parse_type)(i)?;
-        Ok((i, ParsedType::Function(Box::new(t), Box::new(t2))))
+        ParsedType::Function(Box::new(t), Box::new(t2)))
     }
     else {
-        Ok((i,t))
+        t
     }
+    Ok(i, t3)
 }
 // Parses a comment, which is a valid element in our abstract syntax
 // Comments are transformed from FDSSL to match the equivalent GLSL produced
