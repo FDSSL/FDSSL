@@ -201,56 +201,16 @@ fn parse_type_base(i: &str) -> IResult<&str, ParsedType> {
 fn parse_type(i: &str) -> IResult<&str, ParsedType> {
     let (i, _) = space0(i)?;
 
-    let c : char = (*i).chars().nth(0).unwrap();
+    let (i, t) = alt((parse_type_base, parse_type_tuple))(i)?;
 
-    if is_alphabetic(c as u8) || c == '_' {
-        // parse a base type
-        let (i,t) = parse_type_base(i)?;
-        let (i,_) = space0(i)?;
+    let (i, r) = preceded(space0, opt(tag("->")))(i)?;
 
-        let c1 = (*i).chars().nth(0);
-        let c2 = (*i).chars().nth(1);
-
-        match (c1,c2) {
-            (Some('-'),Some('>')) => {
-                // parse again, and build function type w/ these 2 types
-                let (i,t2) = preceded(tuple((space0,tag("->"))), parse_type)(i)?;
-                Ok((
-                    i,
-                    ParsedType::Function(
-                        Box::new(t),
-                        Box::new(t2)
-                    )
-                ))
-            }
-            (_,_)                 => Ok((i,t))
-        }
-
-    } else if c == '(' {
-        // parse a tuple type
-        let (i,t) = parse_type_tuple(i)?;
-        let (i,_) = space0(i)?;
-
-        let c1 = (*i).chars().nth(0);
-        let c2 = (*i).chars().nth(1);
-
-        match (c1,c2) {
-            (Some('-'),Some('>')) => {
-                // parse again, and build function type w/ these 2 types
-                let (i,t2) = preceded(tuple((space0,tag("->"))), parse_type)(i)?;
-                Ok((
-                    i,
-                    ParsedType::Function(
-                        Box::new(t),
-                        Box::new(t2)
-                    )
-                ))
-            }
-            (_,_)                 => Ok((i,t))
-        }
-
-    } else {
-        fail(i)
+    if r.is_some() {
+        let(i, t2) = preceded(space0, parse_type)(i)?;
+        Ok((i, ParsedType::Function(Box::new(t), Box::new(t2))))
+    }
+    else {
+        Ok((i,t))
     }
 }
 // Parses a comment, which is a valid element in our abstract syntax
