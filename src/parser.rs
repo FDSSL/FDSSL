@@ -154,7 +154,7 @@ fn parse_return(i: &str) -> IResult<&str, Expr> {
 }
 
 
-/// parse_type_function parses the Tuple Type annotation.
+/// parse_type_tuple parses the Tuple Type annotation.
 ///
 /// This function parses type annotations of the form (type, type+) where `type`
 /// is any type annotation. This allows the type annotation to nest other
@@ -207,12 +207,12 @@ fn parse_type(i: &str) -> IResult<&str, ParsedType> {
 
     let t3 = if r.is_some() {
         let(i, t2) = preceded(space0, parse_type)(i)?;
-        ParsedType::Function(Box::new(t), Box::new(t2)))
+        ParsedType::Function(Box::new(t), Box::new(t2))
     }
     else {
         t
-    }
-    Ok(i, t3)
+    };
+    Ok((i, t3))
 }
 // Parses a comment, which is a valid element in our abstract syntax
 // Comments are transformed from FDSSL to match the equivalent GLSL produced
