@@ -123,3 +123,6 @@ pub enum Expr {
         body: Vec<Expr>
     }
 }
+
+// program is a vector of expressions
+type Program = Vec<Expr>
