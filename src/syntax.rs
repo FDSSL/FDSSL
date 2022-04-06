@@ -120,6 +120,7 @@ pub enum Expr {
     // parameterized abstraction
     Abs {
         params: Vec<String>,
+        typ: Vec<ParsedType>,
         body: Vec<Expr>
     }
 }

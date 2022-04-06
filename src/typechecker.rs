@@ -59,14 +59,15 @@ use std::collections::HashMap;
 // w/ a HashMap our insertions & lookups pretty bad at O(n), but that's in the worst possible case, on average we should be seeing O(1)
 type TCEnv = HashMap<String,ParsedType>;
 
+// A positive type checked result
+pub type TypeChecked = (ParsedType,TCEnv);
+
+// A negative type checked result
 // Simple type check error, for now, should have locatily at some point
 type TCError = String;
 
-// A generic type-checked type
-pub enum TypeChecked {
-    TC_Pass(ParsedType,TCEnv), // <-- this will help type things out, but not so sure about it in the long run
-    TC_Fail(TCError)
-}
+// Result from typechecking, either a valid typechecked result or an error
+pub type TCResult = Result<TypeChecked, TCError>;
 
 //
 //
@@ -78,33 +79,204 @@ pub enum TypeChecked {
 //
 
 /// Marks a value of given type w/ a valid type
-fn tc_pass(p: ParsedType, t: TCEnv) -> TypeChecked {
-    return TypeChecked::TC_Pass(p,t);
+fn tc_pass(p: ParsedType, t: TCEnv) -> TCResult {
+    return Ok((p,t));
 }
 
 /// Fails the typechecker w/ an error message
-fn tc_fail(e: &str) -> TypeChecked {
-    return TypeChecked::TC_Fail(e.to_string());
+fn tc_fail(e: &str) -> TCResult {
+    return Err(e.to_string());
+}
+
+/// Looks up a parsed type in the TC env, potentially failing
+fn tc_lookup(n: &str, env: TCEnv) -> Result<ParsedType,TCError> {
+    match env.get(n) {
+        Some(p) => p,
+        None    => tc_fail("Non-existant binding '" + n + "' referenced, perhaps you meant to declare it first with 'let' or 'mut'?")
+    }
 }
 
 /// Attempts to typecheck a program
-pub fn tc_program(i: Program) -> TypeChecked {
+pub fn tc_program(i: Program) -> TCResult {
     return tc_fail("Some crap");
 }
 
-// TC an expr
-fn tc_expr(e: Expr) -> TypeChecked {
+/*
+
+## TC(BaseType)
+e : T ∈ Γ
+---------
+Γ ⊢ e : T
+
+IF
+    term 'e' has type 'T' in Gamma
+THEN
+    Gamma implies term 'e' has type 'T' (base case, entries are well-typed)
+
+
+## TC(Constants) ... applies to int, double, float, bool, etc.
+constant(c) ∈ T
+---------------
+Γ ⊢ c : T
+
+IF
+    'c' is a constant of 'T'
+THEN
+    'c' has type 'T' in Gamma
+*/
+
+// Typecheck general expressions
+fn tc_expr(e: Expr, env: TCEnv) -> TCResult {
     let res = match e {
+
+        // Int
         Expr::I(i) => {
             tc_pass(
                 ParsedType::BaseType("int".to_string()),
-                HashMap::new()
+                env
             )
         },
+
+        /*
+        ## TC(Def)
+        n ∉ Γ <-- loosen this constraint, we allow shadowing
+        Γ ⊢ e : T
+        -----------------------
+        Γ ⊢ `let n : T = e` : T
+
+        IF
+            term 'n' is not an element of Gamma (n is unbound)
+            and Gamma entails term 'e' has type 'T'
+        THEN
+            Gamma entails 'let n : T = e' has type 'T'
+        */
+        Expr::Def{name: n, typ: t, value: e} => {
+            let (t1,env) = tc_expr(*e, env)?;
+
+            if t != t1 {
+                // fail if the types don't match
+                tc_fail("Definition of '" + n = "' has type '" + t + "', but was assigned to a value of type '" + t1 + "'");
+
+            } else {
+                // valid, add this name & type combo to our env & continue
+                tc_pass(
+                    t,
+                    env.insert(n,t)
+                )
+            }
+        },
+
+        /*
+        ## TC(DefMut)
+        n ∉ Γ <-- loosen this constraint, we allow shadowing
+        Γ ⊢ e : T
+        --------------------------
+        Γ ⊢ `mut name : T = e` : T
+
+        IF
+            term 'n' is not an element of Gamma (n is unbound)
+            Gamma entails term 'e' has type 'T'
+        THEN
+            Gamma entails 'mut name : T = e' has type 'T'
+            (however, updates to mut bindings are OK, just not w/ 'mut' again)
+        */
+        /// At the moment this is very much the same as constant bindings
+        /// TODO, to distinguish this during updates,
+        ///     we may need a 'mut' or 'let' modifier for bindings ?, or we'll handle this elsewhere...I'll come back to this
+        Expr::DefMut{name: n, typ: t, value: e} => {
+            let (t1,env) = tc_expr(*e, env)?;
+
+            if t != t1 {
+                // fail if the types don't match
+                tc_fail("Definition of '" + n = "' has type '" + t + "', but was assigned to a value of type '" + t1 + "'");
+
+            } else {
+                // valid, add this name & type combo to our env & continue
+                tc_pass(
+                    t,
+                    env.insert(n,t)
+                )
+            }
+        },
+
+        /*
+        ## TC(Update)
+        Γ ⊢ n : T
+        Γ ⊢ e : T
+        ----------------
+        Γ ⊢ `n = e` : T
+
+        IF
+            If Gamma implies term 'n' has type 'T'
+            AND Gamma implies term 'e' has type 'T'
+        THEN
+            Gamma implies `n = e` has type 'T'
+        */
+        Expr::Update{target: n, value: v} => {
+            let t1 = tc_lookup(n)?;
+            let (t2,env) = tc_expr(*v, env);
+            if t1 == t2 {
+                tc_pass(t1,env);
+            } else {
+                tc_fail("Definition of '" + n = "' has type '" + t1 + "', but was assigned to a value of type '" + t2 + "'");
+            }
+        },
+
+        /*
+        ## TC(Parameters)
+        Γ ⊢ T0, ..., Tn
+        ----------------------------
+        Γ ⊢ (n0 : T0, ... , nn : Tn)
+
+        IF
+            Gamma implies types T0 through Tn are valids
+        THEN
+            A parameter listing of those same types is valid
+
+
+        ## TC(Abs)
+        Γ,p : T1 ⊢ e : T2
+        --------------------------
+        Γ ⊢ `(p) { e }` : T1 -> T2
+
+        IF
+            Gamma extended by parameter listing 'p' with type 'T1' implies term 'e' has type 'T2'
+        THEN
+            Gamma alone implies `p {e}` has type `T1 -> T2`
+
+        */
+        /// Tricky, in order to typecheck abstractions they have to have a type declaration separate from their calling context?
+        /// Yeah need to think about that a bit more.
+        Expr::Abs{params: p, body: b} => {
+            // TODO, needs to haves types added to its AST representation, otherwise we simply can't get this to work
+            // We will have to modify the parser to get that to work as expected
+        },
+
+        /*
+        ## TC(App)
+        Γ ⊢ f : T1 -> T2
+        Γ ⊢ e : T1
+        -----------------
+        Γ ⊢ f(e) : T2
+
+        IF
+            Gamma implies term 'f' has type 'T1 -> T2'
+            AND Gamma implies term 'e' has type 'T1'
+        THEN
+            Gamma implies `f(e)` (f applied to e) has type 'T2'
+        */
+        /// Function application
+        Expr::App{fname: f, arguments: args} => {
+            let t1 = tc_lookup(f, env)?;
+            let t2List = // ... map lookups across all args, giving their values
+            // and then match them here, they should be equal
+        }
+
+        /// BinOp
         Expr::BinOp{operator: b, e1: e11, e2: e22} => {
             // can use '?' here to help unwrap conditional value, using maybe or Either?
-            let (t1,e1) = tc_expr(e11);
-            let (t2,e2) = tc_expr(e22);
+            let (t1,e1) = tc_expr(*e11)?;
+            let (t2,e2) = tc_expr(*e22)?;
             if t1 == t2 {
                 tc_pass(
                     t1,
@@ -129,102 +301,6 @@ fn tc_expr(e: Expr) -> TypeChecked {
 #
 # Typing Rules
 #
-
-## TC(BaseType)
-e : T ∈ Γ
----------
-Γ ⊢ e : T
-
-IF
-    term 'e' has type 'T' in Gamma
-THEN
-    Gamma implies term 'e' has type 'T' (base case, entries are well-typed)
-
-
-## TC(Constants) ... applies to int, double, float, bool, etc.
-constant(c) ∈ T
----------------
-Γ ⊢ c : T
-
-IF
-    'c' is a constant of 'T'
-THEN
-    'c' has type 'T' in Gamma
-
-
-## TC(Def)
-n ∉ Γ <-- loosen this constraint, we allow shadowing
-Γ ⊢ e : T
------------------------
-Γ ⊢ `let n : T = e` : T
-
-IF
-    term 'n' is not an element of Gamma (n is unbound)
-    and Gamma entails term 'e' has type 'T'
-THEN
-    Gamma entails 'let n : T = e' has type 'T'
-
-
-## TC(DefMut)
-n ∉ Γ <-- loosen this constraint, we allow shadowing
-Γ ⊢ e : T
---------------------------
-Γ ⊢ `mut name : T = e` : T
-
-IF
-    term 'n' is not an element of Gamma (n is unbound)
-    Gamma entails term 'e' has type 'T'
-THEN
-    Gamma entails 'mut name : T = e' has type 'T'
-    (however, updates to mut bindings are OK, just not w/ 'mut' again)
-
-
-## TC(Update)
-Γ ⊢ n : T
-Γ ⊢ e : T
-----------------
-Γ ⊢ `n = e` : T
-
-IF
-    If Gamma implies term 'n' has type 'T'
-    AND Gamma implies term 'e' has type 'T'
-THEN
-    Gamma implies `n = e` has type 'T'
-
-
-## TC(Parameters)
-Γ ⊢ T0, ..., Tn
-----------------------------
-Γ ⊢ (n0 : T0, ... , nn : Tn)
-
-IF
-    Gamma implies types T0 through Tn are valids
-THEN
-    A parameter listing of those same types is valid
-
-
-## TC(Abs)
-Γ,p : T1 ⊢ e : T2
---------------------------
-Γ ⊢ `(p) { e }` : T1 -> T2
-
-IF
-    Gamma extended by parameter listing 'p' with type 'T1' implies term 'e' has type 'T2'
-THEN
-    Gamma alone implies `p {e}` has type `T1 -> T2`
-
-
-## TC(App)
-Γ ⊢ f : T1 -> T2
-Γ ⊢ e : T1
------------------
-Γ ⊢ f(e) : T2
-
-IF
-    Gamma implies term 'f' has type 'T1 -> T2'
-    AND Gamma implies term 'e' has type 'T1'
-THEN
-    Gamma implies `f(e)` (f applied to e) has type 'T2'
 
 
 ## TC(Unary)
