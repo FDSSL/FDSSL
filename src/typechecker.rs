@@ -1,5 +1,3 @@
-use crate::typechecker;
-
 /*
 
 Alright, plan of action, I wrote out a bunch of 'typing'
@@ -46,6 +44,88 @@ Typing Relation
     Γ ⊢ e : T == term 'e' has type 'T' in Gamma (says 'e' is well-typed under the context of Gamma)
 ....
 
+*/
+
+use crate::syntax;
+
+use syntax::Expr;
+use syntax::BOp;
+use syntax::Program;
+use syntax::ParsedType;
+
+use std::collections::HashMap;
+
+// Type env, contains bindings of 'things' to types...these can be Exprs or Names
+// w/ a HashMap our insertions & lookups pretty bad at O(n), but that's in the worst possible case, on average we should be seeing O(1)
+type TCEnv = HashMap<String,ParsedType>;
+
+// Simple type check error, for now, should have locatily at some point
+type TCError = String;
+
+// A generic type-checked type
+pub enum TypeChecked {
+    TC_Pass(ParsedType,TCEnv), // <-- this will help type things out, but not so sure about it in the long run
+    TC_Fail(TCError)
+}
+
+//
+//
+// 1. Rewrote the 'TypeChecked' items above
+// 2. Make sure that we define something for EACH kind of Expr
+// 3. I.e. we should be able to handle specific expressions,
+//      type check them, and return their Type + TypeEnv (type of pass)
+// 4.
+//
+
+/// Marks a value of given type w/ a valid type
+fn tc_pass(p: ParsedType, t: TCEnv) -> TypeChecked {
+    return TypeChecked::TC_Pass(p,t);
+}
+
+/// Fails the typechecker w/ an error message
+fn tc_fail(e: &str) -> TypeChecked {
+    return TypeChecked::TC_Fail(e.to_string());
+}
+
+/// Attempts to typecheck a program
+pub fn tc_program(i: Program) -> TypeChecked {
+    return tc_fail("Some crap");
+}
+
+// TC an expr
+fn tc_expr(e: Expr) -> TypeChecked {
+    let res = match e {
+        Expr::I(i) => {
+            tc_pass(
+                ParsedType::BaseType("int".to_string()),
+                HashMap::new()
+            )
+        },
+        Expr::BinOp{operator: b, e1: e11, e2: e22} => {
+            // can use '?' here to help unwrap conditional value, using maybe or Either?
+            let (t1,e1) = tc_expr(e11);
+            let (t2,e2) = tc_expr(e22);
+            if t1 == t2 {
+                tc_pass(
+                    t1,
+                    HashMap::new()
+                )
+            } else {
+                tc_fail("Bad binop!")
+            }
+        },
+        // fill in the rest here, and just call out the relevant handler
+        _ => tc_fail("Unrecognized expression!")
+    };
+    return res;
+}
+
+// function that maps some type into a generic type-checked type
+// tc :: a -> TCEnv -> Either TCError (type,TCEnv)
+//fn tc
+
+/*
+
 #
 # Typing Rules
 #
@@ -73,7 +153,7 @@ THEN
 
 
 ## TC(Def)
-n ∉ Γ
+n ∉ Γ <-- loosen this constraint, we allow shadowing
 Γ ⊢ e : T
 -----------------------
 Γ ⊢ `let n : T = e` : T
@@ -86,7 +166,7 @@ THEN
 
 
 ## TC(DefMut)
-n ∉ Γ
+n ∉ Γ <-- loosen this constraint, we allow shadowing
 Γ ⊢ e : T
 --------------------------
 Γ ⊢ `mut name : T = e` : T

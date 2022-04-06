@@ -1,7 +1,9 @@
 mod syntax;
 mod parser;
+mod typechecker;
 
 use parser::program;
+use typechecker::tc_program;
 
 fn main() {
     let prog = "\

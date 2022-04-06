@@ -125,4 +125,4 @@ pub enum Expr {
 }
 
 // program is a vector of expressions
-type Program = Vec<Expr>
+pub type Program = Vec<Expr>;
