@@ -13,7 +13,7 @@ extern crate nom;
 use nom::bytes::complete::{tag};
 use nom::character::complete::{char, alpha1, alphanumeric1, i32, multispace0, space0, space1, line_ending, not_line_ending, digit1};
 use nom::{IResult};
-use nom::character::is_alphabetic;
+//use nom::character::is_alphabetic;
 use nom::branch::alt;
 use nom::multi::{many0, many1, separated_list0, separated_list1};
 use nom::sequence::{preceded, delimited, terminated, separated_pair, tuple, pair};
@@ -294,7 +294,22 @@ fn parse_abs(input: &str) -> IResult<&str, Expr> {
         preceded(space0, char(')'))
     )(input)?;
     let (input,exprs)   = parse_scoped_exprs(input)?;
-    Ok((input, Expr::Abs{params: params, body: exprs}))
+
+    let mut tmpTyp = vec![];
+
+    //
+    // TODO rework, not great (@montymxb)
+    //
+    // This is me being lazy, since we're having issues with types on Abstractions. They either need to be declared explicitly or inferred
+    // Currently we're doing neither of these approaches. This attempt is to create dummy types which are filled in during typechecking, really NOT a great approach
+    // but the idea is to get prototyping working first, and then revise later. The rest seems okay, but we will also need to revise ParsedType back into just 'Type', having them separate is unclear, and using strings as 'types' is generally bad as well.
+    //
+    for _x in 0..params.len() {
+        tmpTyp.push(Box::new(ParsedType::BaseType("".to_string())))
+    }
+
+    // TODO need 'typ' parameter added as well
+    Ok((input, Expr::Abs{params: params, typ: ParsedType::Tuple(tmpTyp), body: exprs}))
 }
 
 fn parse_unary_expr(input: &str) -> IResult<&str, Expr> {

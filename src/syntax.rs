@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Debug,PartialEq)]
 pub enum Type {
     Uint,
@@ -20,7 +22,19 @@ pub enum Type {
 pub enum ParsedType {
     BaseType(String),
     Tuple(Vec<Box<ParsedType>>),
+    NamedTuple(Vec<(String, Box<ParsedType>)>), // stores indexed types for named tuples
     Function(Box<ParsedType>, Box<ParsedType>),
+}
+
+/// User friendly dipslyaing of parsed types in TypeChecker errors
+impl fmt::Display for ParsedType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            ParsedType::BaseType(s)     => write!(f, "{}", s),
+            ParsedType::Tuple(v)        => write!(f, "({})", format!("{:?}",v)),
+            ParsedType::Function(t1,t2) => write!(f, "({}) -> ({})", format!("{}",t1), format!("{}",t2))
+        }
+    }
 }
 
 #[derive(Debug,PartialEq,Clone,Copy)]
@@ -48,6 +62,15 @@ pub enum BOp {
 pub enum UOp {
     Negative,
     Negate
+}
+
+impl fmt::Display for UOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            UOp::Negative   => write!(f, "-"),
+            UOp::Negate     => write!(f, "!")
+        }
+    }
 }
 
 #[derive(Debug,PartialEq)]
@@ -120,7 +143,7 @@ pub enum Expr {
     // parameterized abstraction
     Abs {
         params: Vec<String>,
-        typ: Vec<ParsedType>,
+        typ: ParsedType,
         body: Vec<Expr>
     }
 }

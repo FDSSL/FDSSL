@@ -50,8 +50,14 @@ use crate::syntax;
 
 use syntax::Expr;
 use syntax::BOp;
+use syntax::UOp;
 use syntax::Program;
 use syntax::ParsedType;
+use syntax::ParsedType::Tuple;
+use syntax::ParsedType::NamedTuple;
+use syntax::ParsedType::Function;
+use syntax::ParsedType::BaseType;
+use syntax::AccessType::Name;
 
 use std::collections::HashMap;
 
@@ -91,14 +97,161 @@ fn tc_fail(e: &str) -> TCResult {
 /// Looks up a parsed type in the TC env, potentially failing
 fn tc_lookup(n: &str, env: TCEnv) -> Result<ParsedType,TCError> {
     match env.get(n) {
-        Some(p) => p,
-        None    => tc_fail("Non-existant binding '" + n + "' referenced, perhaps you meant to declare it first with 'let' or 'mut'?")
+        Some(p) => Ok(*p),
+        None    => Err(format!("Non-existant binding '{n}' referenced, perhaps you meant to declare it first with 'let' or 'mut'?"))
     }
 }
 
 /// Attempts to typecheck a program
 pub fn tc_program(i: Program) -> TCResult {
-    return tc_fail("Some crap");
+    return tc_fail("NEEDS TO BE IMPLEMENTED STILL!");
+}
+
+/// Typechecks a vector of Exprs w/ a given environment
+/// Verifies all of them before returning the result of the last Expr
+/// Expects a body of 1 or more Exprs to verify
+fn tc_body(body: Vec<Expr>, env: TCEnv) -> TCResult {
+    if body.len() <= 0 {
+        // must have something to work with
+        tc_fail("Unable to typecheck an empty body!")
+
+    } else {
+        // typecheck each expr to make sure no errors occur normally
+        let result : TCResult = Err("".to_string());
+        for expr in body {
+            result = tc_expr(expr, env);
+            match result {
+                // update env on valid check
+                Ok((_,t))   => env = t,
+                // propagate any error up
+                Err(s)      => return Err(s)
+            };
+        }
+        // only return the result of the last check
+        result
+
+    }
+}
+
+
+/// Returns the immediate arity of a given type w/ a depth of 0
+/// All types return 1 except for tuples
+fn type_arity(t: ParsedType) -> usize {
+    match t {
+        Tuple(v)    => v.len(), // get arity of this tuple, disregarding nesting of other tuples
+        _           => 1 // all others are 1
+    }
+}
+
+/// Helper to make a function type
+fn mk_func_typ(t1: ParsedType, t2: ParsedType) -> ParsedType {
+    Function(Box::new(t1), Box::new(t2))
+}
+
+/// Helper to make a tuple type
+fn mk_tup_typ(typs: Vec<ParsedType>) -> ParsedType {
+    Tuple(typs.into_iter().map(|t| Box::new(t)).collect())
+}
+
+/// Helper to make a base type from an &str
+fn typ(s: &str) -> ParsedType {
+    BaseType(s.to_string())
+}
+
+/// Helper to produce a homogenous binary function type
+fn mk_bin_func(t: ParsedType) -> ParsedType {
+    mk_func_typ(mk_tup_typ(vec![t,t]), t)
+}
+
+/// Returns the type that corresponds to a given BinOp
+/// TODO, needs args types to determine overloaded arithmetic types
+fn bop_type(bop: BOp, a1t: ParsedType, a2t: ParsedType) ->  Result<ParsedType,TCError> {
+
+    // extract type names of base types, nothing else should go here
+    let (n1,n2) = match (a1t,a2t) {
+        (BaseType(b1),BaseType(b2)) => (b1.as_str(), b2.as_str())
+    };
+
+    match (bop, n1, n2, a1t == a2t) {
+        (Add, "int", "int", _)       => Ok(mk_bin_func(a1t)),
+        (Add, "float", "float", _)   => Ok(mk_bin_func(a1t)),
+        (Add, "double", "double", _) => Ok(mk_bin_func(a1t)),
+
+        (Sub, "int", "int", _)       => Ok(mk_bin_func(a1t)),
+        (Sub, "float", "float", _)   => Ok(mk_bin_func(a1t)),
+        (Sub, "double", "double", _) => Ok(mk_bin_func(a1t)),
+
+        (Mul, "int", "int", _)       => Ok(mk_bin_func(a1t)),
+        (Mul, "float", "float", _)   => Ok(mk_bin_func(a1t)),
+        (Mul, "double", "double", _) => Ok(mk_bin_func(a1t)),
+
+        (Div, "int", "int", _)       => Ok(mk_bin_func(a1t)),
+        (Div, "float", "float", _)   => Ok(mk_bin_func(a1t)),
+        (Div, "double", "double", _) => Ok(mk_bin_func(a1t)),
+
+        // modolu only w/ ints
+        (Mod, "int", "int", _)    => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), a1t)),
+        (Mod, "float", "int", _)  => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), a1t)),
+        (Mod, "double", "int", _) => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), a1t)),
+
+        (And, "bool", "bool", _) => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), a1t)),
+        (Or, "bool", "bool", _)  => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), a1t)),
+
+        // TODO Compose is not quite done yet
+        (Compose, _, _, _)  => {
+            match(a1t, a2t) {
+                (Function(a1,a2), Function(b1,b2))  => {
+                    if *a2 == *b1 {
+                        Ok(mk_func_typ(*a1, *b2))
+                    } else {
+                        // better error here
+                        Err("Can only compose function types!".to_string())
+                    }
+                }
+            }
+        },
+
+        // eq for any 2 types
+        (Eq, _, _, true)   => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+        (Neq, _, _, true)  => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+
+        (Gt, "int", "int", _)         => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+        (Gt, "float", "float", _)     => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+        (Gt, "double", "double", _)   => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+
+        (Gte, "int", "int", _)         => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+        (Gte, "float", "float", _)     => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+        (Gte, "double", "double", _)   => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+
+        (Lt, "int", "int", _)         => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+        (Lt, "float", "float", _)     => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+        (Lt, "double", "double", _)   => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+
+        (Lte, "int", "int", _)         => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+        (Lte, "float", "float", _)     => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+        (Lte, "double", "double", _)   => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), typ("bool"))),
+
+        (BitAnd, "int", "int", _)   => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), a1t)),
+        (BitOr, "int", "int", _)    => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), a1t)),
+        (BitXor, "int", "int", _)   => Ok(mk_func_typ(mk_tup_typ(vec![a1t,a2t]), a1t))
+    }
+}
+
+/// Returns the type that corresponds to a given Unary op
+/// TODO, needs args type to determine overloaded arithmetic types
+fn uop_type(uop: UOp, argType: ParsedType) -> ParsedType {
+
+    let argName = match argType {
+        BaseType(n) => n.as_str()
+    };
+
+    match (uop, argName) {
+        (Negative, "int")      => mk_func_typ(argType, argType),
+        (Negative, "float")    => mk_func_typ(argType, argType),
+        (Negative, "double")   => mk_func_typ(argType, argType),
+
+        (Negate, "bool")   => mk_func_typ(argType, argType)
+    }
 }
 
 /*
@@ -155,14 +308,15 @@ fn tc_expr(e: Expr, env: TCEnv) -> TCResult {
 
             if t != t1 {
                 // fail if the types don't match
-                tc_fail("Definition of '" + n = "' has type '" + t + "', but was assigned to a value of type '" + t1 + "'");
+                return tc_fail(format!("Definition of '{n}' has type '{t}', but was assigned to a value of type '{t1}'").as_str());
 
             } else {
                 // valid, add this name & type combo to our env & continue
-                tc_pass(
+                env.insert(n,t);
+                return tc_pass(
                     t,
-                    env.insert(n,t)
-                )
+                    env
+                );
             }
         },
 
@@ -180,21 +334,22 @@ fn tc_expr(e: Expr, env: TCEnv) -> TCResult {
             Gamma entails 'mut name : T = e' has type 'T'
             (however, updates to mut bindings are OK, just not w/ 'mut' again)
         */
-        /// At the moment this is very much the same as constant bindings
-        /// TODO, to distinguish this during updates,
-        ///     we may need a 'mut' or 'let' modifier for bindings ?, or we'll handle this elsewhere...I'll come back to this
+        // At the moment this is very much the same as constant bindings
+        // TODO, to distinguish this during updates,
+        //     we may need a 'mut' or 'let' modifier for bindings ?, or we'll handle this elsewhere...I'll come back to this
         Expr::DefMut{name: n, typ: t, value: e} => {
             let (t1,env) = tc_expr(*e, env)?;
 
             if t != t1 {
                 // fail if the types don't match
-                tc_fail("Definition of '" + n = "' has type '" + t + "', but was assigned to a value of type '" + t1 + "'");
+                return tc_fail(format!("Definition of '{n}' has type '{t}', but was assigned to a value of type '{t1}'").as_str());
 
             } else {
                 // valid, add this name & type combo to our env & continue
-                tc_pass(
+                env.insert(n,t);
+                return tc_pass(
                     t,
-                    env.insert(n,t)
+                    env
                 )
             }
         },
@@ -213,17 +368,17 @@ fn tc_expr(e: Expr, env: TCEnv) -> TCResult {
             Gamma implies `n = e` has type 'T'
         */
         Expr::Update{target: n, value: v} => {
-            let t1 = tc_lookup(n)?;
-            let (t2,env) = tc_expr(*v, env);
+            let t1 = tc_lookup(&n, env)?;
+            let (t2,env) = tc_expr(*v, env)?;
             if t1 == t2 {
-                tc_pass(t1,env);
+                return tc_pass(t1,env);
             } else {
-                tc_fail("Definition of '" + n = "' has type '" + t1 + "', but was assigned to a value of type '" + t2 + "'");
+                return tc_fail(format!("Definition of '{n}' has type '{t1}', but was assigned to a value of type '{t2}'").as_str());
             }
         },
 
         /*
-        ## TC(Parameters)
+        ## TC(Parameters) ~~~ This one is coming from the types given to the abstraction by its context
         Γ ⊢ T0, ..., Tn
         ----------------------------
         Γ ⊢ (n0 : T0, ... , nn : Tn)
@@ -245,11 +400,53 @@ fn tc_expr(e: Expr, env: TCEnv) -> TCResult {
             Gamma alone implies `p {e}` has type `T1 -> T2`
 
         */
-        /// Tricky, in order to typecheck abstractions they have to have a type declaration separate from their calling context?
-        /// Yeah need to think about that a bit more.
-        Expr::Abs{params: p, body: b} => {
-            // TODO, needs to haves types added to its AST representation, otherwise we simply can't get this to work
-            // We will have to modify the parser to get that to work as expected
+        // Tricky, in order to typecheck abstractions they have to have a type declaration separate from their calling context?
+        // Yeah need to think about that a bit more.
+        Expr::Abs{params: p, typ: t, body: b} => {
+            let (tb,env1) = tc_body(b,env)?;
+            match t {
+                Function(t1,t2) => {
+                    if type_arity(*t1) != p.len() {
+                        // bad dimensionality, i.e. number of params does not match those that can be resolved to a type
+                        return tc_fail(format!("Type '{t1}' does not match the number of parameters given to this abstraction.").as_str());
+
+                    } else if *t2 == tb {
+                        // result type in function matches type of body, ok!
+                        return tc_pass(
+                            t,
+                            env1
+                        );
+
+                    } else {
+                        // type mismatch
+                        return tc_fail(format!("Abstraction has type '{t}', but has a body of type '{tb}'. Consider changing what type the body produces, or the type of the abstraction to fix this.").as_str());
+
+                    }
+                },
+                anyOtherType    => {
+                    // simple case, not a function type (no params)
+                    if p.len() != 0 {
+                        // can't pass args to a function that doesn't have parameters!
+                        return tc_fail(format!("Abstraction has parameters, but it's type, '{t}' does not take parameters. Consider changing the type or removing the parameters to fix this.").as_str());
+
+                    } else if t == anyOtherType {
+                        // match
+                        return tc_pass(
+                            anyOtherType,
+                            env1
+                        )
+                    } else {
+                        // mismatch
+                        return tc_fail(format!("Abstraction has type '{t}', but has a body of type '{anyOtherType}'. Consider changing what type the body produces, or the type of the abstraction to fix this.").as_str());
+
+                    }
+                }
+            };
+            // This needs more work, the number of params needs to match
+            // the dimensionality of the type provided
+            // when typ is NOT a function type, params should be empty, and match w/ type of body
+            // when typ IS a function type, params should not be empty, and they should match the dimensionality
+            // of the type provided, and the 2nd part of typ should match the typ of body
         },
 
         /*
@@ -265,106 +462,252 @@ fn tc_expr(e: Expr, env: TCEnv) -> TCResult {
         THEN
             Gamma implies `f(e)` (f applied to e) has type 'T2'
         */
-        /// Function application
+        // Function application
         Expr::App{fname: f, arguments: args} => {
-            let t1 = tc_lookup(f, env)?;
-            let t2List = // ... map lookups across all args, giving their values
-            // and then match them here, they should be equal
+            // get func type for app
+            let t1 = tc_lookup(&f, env)?;
+            // typecheck each arg, and produce a list of arg types
+            let argTypeList = vec![];
+            for e in args {
+                let (t,env2) = tc_expr(e,env)?;
+                argTypeList.push(t);
+                env = env2;
+            }
+
+            let argType : ParsedType = ParsedType::BaseType("".to_string());
+
+            if argTypeList.len() == 1 {
+                // just a base type
+                argType = argTypeList[0];
+
+            } else {
+                // tuple type
+                argType = ParsedType::Tuple(argTypeList.into_iter().map(|t| Box::new(t)).collect());
+
+            }
+
+            match t1 {
+                Function(ft1,ft2)   => {
+                    if *ft1 == argType {
+                        // types of args match param types
+                        // produce resultant type
+                        return tc_pass(
+                            *ft2,
+                            env
+                        );
+
+                    } else {
+                        // mismatch
+                        return tc_fail(format!("Function '{f}' of type '{t1}' applied to args of type '{argType}'. Consider changing the args to match the function type, or change the type of the function to fix this.").as_str());
+                    }
+
+                },
+                anyOtherType        => {
+                    // auto fail, no parameters for the type of this function!
+                    return tc_fail(format!("Function '{f}' of type '{t1}' is applied to arguments, but has no parameters in its type. Remove the arguments to fix this problem, or change the type of the function to accept arguments.").as_str());
+
+                }
+            }
         }
 
-        /// BinOp
+        /*
+        ## TC(BinOp), homogenous
+        Γ ⊢ f : (T,T) -> T
+        Γ ⊢ e1 = e2 : T
+        -----------------------
+        Γ ⊢ e1 f e2 : T
+
+        IF
+            Gamma implies term 'f' has type '(T,T) -> T'
+            AND Gamma implies terms 'e1' and 'e2' share the same type 'T'
+        THEN
+            Gamma implies `e1 f e2` has type 'T'
+            (NOTE: This is the restrictive case, it does NOT allow for binary ops w/ heterogenous types)
+        */
+        // BinOp
         Expr::BinOp{operator: b, e1: e11, e2: e22} => {
             // can use '?' here to help unwrap conditional value, using maybe or Either?
-            let (t1,e1) = tc_expr(*e11)?;
-            let (t2,e2) = tc_expr(*e22)?;
-            if t1 == t2 {
-                tc_pass(
-                    t1,
-                    HashMap::new()
-                )
-            } else {
-                tc_fail("Bad binop!")
+            let (t1,e1) = tc_expr(*e11, env)?;
+            let (t2,e2) = tc_expr(*e22, e1)?;
+            // get param type & result type for this BinOp
+            let btyp = bop_type(b, t1, t2)?;
+
+            match btyp {
+                Function(tp, tr)    => {
+                    // compare w/ args
+                    if Tuple(vec![Box::new(t1),Box::new(t2)]) == *tp {
+                        tc_pass(
+                            *tr,
+                            e2
+                        )
+                    } else {
+                        // TODO not a very descriptive error message, needs to be improved
+                        tc_fail("Bad binop!")
+                    }
+                }
             }
         },
+
+        /*
+        ## TC(Unary)
+        Γ ⊢ u : T1 -> T2
+        Γ ⊢ e : T1
+        -----------------------
+        Γ ⊢ u e : T2
+
+        WLOG, same as TC(App) above, but w/ no parens
+        */
+        Expr::UnaryOp{operator: b, e: e} => {
+            // TODO setup to get type of uop and match w/ expr type
+            let (t2,env1) = tc_expr(*e, env)?;
+            let uopTyp = uop_type(b, t2);
+
+            match uopTyp {
+                Function(f1,f2) => {
+                    if *f1 == t2 {
+                       // match
+                        return tc_pass(
+                            *f2,
+                            env1
+                        );
+
+                    } else {
+                        // mismatch
+                        return tc_fail(format!("Unary operator '{b}' was expecting an argument of type '{f1}' but got an argument of type '{t2}' instead").as_str());
+
+                    }
+                }
+            }
+        },
+
+
+        /*
+        ## TC(Branch)
+        Γ,c : Bool ⊢ e1 = e2 : T
+        -------------------------------
+        Γ ⊢ `if(c) {e1} else {e2}` : T
+
+        IF
+            Gamma extended by term 'c' with type 'Bool' implies terms 'e1' and 'e2' share the same type 'T'
+        THEN
+            Gamma implies `if(c) {e1} else {e2}` has type 'T'
+        */
+        // BRANCH
+        Expr::Branch{condition: c, b1: b1, b2: b2} => {
+            let (t1,env1) = tc_expr(*c, env)?;
+            if t1 != BaseType("bool".to_string()) {
+                return tc_fail(format!("'If' was expecting an expression of type 'bool', but got an expression of type '{t1}' instead").as_str());
+
+            } else {
+                // verify the types of b1 & b2 match
+                let (tb1,env2) = tc_body(b1,env1)?;
+                let (tb2,env3) = tc_body(b1,env2)?;
+
+                if tb1 == tb2 {
+                    // body types match
+                    return tc_pass(
+                        tb1,
+                        env3
+                    );
+
+                } else {
+                    // body types do NOT match, fail
+                    return tc_fail(format!("'If' branches were expected to have the same type, but have differing types of '{tb1}' and '{tb2}' instead").as_str());
+
+                }
+            }
+        },
+
+
+        /*
+        ## TC(AccessInx)
+        Γ ⊢ e : IVec(T1, ..., Tn)
+        Γ ⊢ i : Int
+        i ∈ e
+        -------------------------  Ti ∈ IVec(T1, ..., Tn)
+        Γ ⊢ e[i] : Ti
+
+        IF
+            Gamma implies term 'e' has type 'IVec(T1, ..., Tn)'
+            AND Gamma implies term 'i' has type 'Int'
+            AND 'i' is an element of term 'e'
+            AND side condition Ti is an element of IVec(T1, ..., Tn) holds
+        THEN
+            Gamma implies `e[i]` has type 'Ti'
+
+
+        ## TC(AccessNam)
+        Γ ⊢ e : NVec(T1, ..., Tn)
+        i isProp e
+        ----------------------------------- Ti ∈ NVec(T1, ..., Tn)
+        Γ ⊢ e.i : Ti
+
+        IF
+            Gamma implies term 'e' has type 'NVec(T1, ..., Tn)'
+            AND 'i' is an property of term 'e'
+            AND side condition Ti is an element of NVec(T1, ..., Tn) holds
+        THEN
+            Gamma implies property i of e, `e.i`, has type 'Ti'
+        */
+        // ACCESS by INDEX or NAME
+        Expr::Access(n, at) => {
+            match at {
+                // access by name
+                Name(prop) => {
+                    // return the property type for this item's name
+                    let t = tc_lookup(&n, env)?;
+                    match t {
+                        NamedTuple(namedTypes)  => {
+                            for (name,typ) in namedTypes {
+                                if name == prop {
+                                    // immediately produce this type w/out any other work
+                                    return tc_pass(*typ, env);
+                                }
+                            }
+                            tc_fail(format!("Property '{}' on tuple '{}' is not defined", prop, n).as_str())
+                        }
+                    }
+                }
+                // access by index
+                // TODO removed for now, given the need to pre-evaluate in order to determine what type is produced from a heterogeneous tuple
+                // Idx(be)  => {
+                //     // lookup type of ref & accessor
+                //     let t1 = tc_lookup(&n, env)?;
+                //     let (t2,env1) = tc_expr(*be,env)?;
+
+                //     if t2 != BaseType("int") {
+                //         // bad index
+                //         tc_fail("Indexed access of '" + n + "' expected an int, but got an expr of type '" + t2 + "' instead");
+
+                //     } else {
+                //         // tc the expr at the provided location
+                //         match t1 {
+                //             Tuple(typevect) => {
+                //                 // return and unbox that entry
+                //                 tc_pass(
+                //                     typevect[], // TODO index cannot be determined without evaluating first, need a value to determine what kind of value is produced here for heterogeneous vectors
+                //                     env1
+                //                 );
+                //             },
+                //             _               => tc_fail("Expected index of tuple type, but instead attempted to index type '" + t1 + "'")
+                //         }
+                //     }
+                // }
+            }
+        },
+
+
         // fill in the rest here, and just call out the relevant handler
         _ => tc_fail("Unrecognized expression!")
     };
     return res;
 }
 
-// function that maps some type into a generic type-checked type
-// tc :: a -> TCEnv -> Either TCError (type,TCEnv)
-//fn tc
-
 /*
 
 #
 # Typing Rules
 #
-
-
-## TC(Unary)
-Γ ⊢ u : T1 -> T2
-Γ ⊢ e : T1
------------------------
-Γ ⊢ u e : T2
-
-WLOG, same as TC(App) above, but w/ no parens
-
-
-## TC(BinOp), homogenous
-Γ ⊢ f : (T,T) -> T
-Γ ⊢ e1 = e2 : T
------------------------
-Γ ⊢ e1 f e2 : T
-
-IF
-    Gamma implies term 'f' has type '(T,T) -> T'
-    AND Gamma implies terms 'e1' and 'e2' share the same type 'T'
-THEN
-    Gamma implies `e1 f e2` has type 'T'
-    (NOTE: This is the restrictive case, it does NOT allow for binary ops w/ heterogenous types)
-
-
-## TC(Branch)
-Γ,c : Bool ⊢ e1 = e2 : T
--------------------------------
-Γ ⊢ `if(c) {e1} else {e2}` : T
-
-IF
-    Gamma extended by term 'c' with type 'Bool' implies terms 'e1' and 'e2' share the same type 'T'
-THEN
-    Gamma implies `if(c) {e1} else {e2}` has type 'T'
-
-
-## TC(AccessInx)
-Γ ⊢ e : IVec(T1, ..., Tn)
-Γ ⊢ i : Int
-i ∈ e
--------------------------  Ti ∈ IVec(T1, ..., Tn)
-Γ ⊢ e[i] : Ti
-
-IF
-    Gamma implies term 'e' has type 'IVec(T1, ..., Tn)'
-    AND Gamma implies term 'i' has type 'Int'
-    AND 'i' is an element of term 'e'
-    AND side condition Ti is an element of IVec(T1, ..., Tn) holds
-THEN
-    Gamma implies `e[i]` has type 'Ti'
-
-
-## TC(AccessNam)
-Γ ⊢ e : NVec(T1, ..., Tn)
-i isProp e
------------------------------------ Ti ∈ NVec(T1, ..., Tn)
-Γ ⊢ e.i : Ti
-
-IF
-    Gamma implies term 'e' has type 'NVec(T1, ..., Tn)'
-    AND 'i' is an property of term 'e'
-    AND side condition Ti is an element of NVec(T1, ..., Tn) holds
-THEN
-    Gamma implies property i of e, `e.i`, has type 'Ti'
 
 
 ??? TC(For)
