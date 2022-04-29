@@ -288,28 +288,14 @@ fn parse_branch(input: &str) -> IResult<&str, Expr> {
 /// The parameters themselves lack a type here, as they are bound by the context they are assigned within
 fn parse_abs(input: &str) -> IResult<&str, Expr> {
     // parse delimited args
-    let (input,params)  = delimited(
+    let (input,typed_params)  = delimited(
         preceded(space0, char('(')),
-        separated_list0(preceded(space0, tag(",")), name_str),
+        // ugly, but works as name : Type
+        separated_list0(preceded(space0, tag(",")), separated_pair(preceded(space0, name_str), preceded(space0, tag(":")), parse_type)),
         preceded(space0, char(')'))
     )(input)?;
     let (input,exprs)   = parse_scoped_exprs(input)?;
-
-    let mut tmpTyp = vec![];
-
-    //
-    // TODO rework, not great (@montymxb)
-    //
-    // This is me being lazy, since we're having issues with types on Abstractions. They either need to be declared explicitly or inferred
-    // Currently we're doing neither of these approaches. This attempt is to create dummy types which are filled in during typechecking, really NOT a great approach
-    // but the idea is to get prototyping working first, and then revise later. The rest seems okay, but we will also need to revise ParsedType back into just 'Type', having them separate is unclear, and using strings as 'types' is generally bad as well.
-    //
-    for _x in 0..params.len() {
-        tmpTyp.push(Box::new(ParsedType::BaseType("".to_string())))
-    }
-
-    // TODO need 'typ' parameter added as well
-    Ok((input, Expr::Abs{params: params, typ: ParsedType::Tuple(tmpTyp), body: exprs}))
+    Ok((input, Expr::Abs{params: typed_params, body: exprs}))
 }
 
 fn parse_unary_expr(input: &str) -> IResult<&str, Expr> {
@@ -359,7 +345,9 @@ fn parse_named_vect(input: &str) -> IResult<&str, Expr> {
         separated_list1(preceded(space0, tag(",")), separated_pair(preceded(space0, name_str), preceded(space0, tag(":")), parse_expr)),
         preceded(space0, char(')'))
     );
-    map(p, |s: Vec<(String,Expr)>| Expr::NamedVect(s))(input)
+    // accept a named vect that is NOT terminated by an opening curly brace
+    // If so, it was a failed abstraction that we should continue to reject
+    map(terminated(p,not(tuple((multispace0,char('{'))))), |s: Vec<(String,Expr)>| Expr::NamedVect(s))(input)
 }
 
 
@@ -399,12 +387,12 @@ fn parse_expr(input: &str) -> IResult<&str, Expr> {
         parse_unary_expr,
         parse_bool,
         parse_comment,
-        parse_named_vect,
 
         // Abs vs. Nested Exprs are position sensitive
         // Nested Exprs must be checked after Abs, or abstractions will
         // be mangled before they can be checked
         parse_abs,
+        parse_named_vect,
         parse_nested_expr,
         parse_vect,
 
@@ -802,21 +790,28 @@ fn test_parse_branch() {
     assert_eq!(parse_expr("if oops(1,2) { 5 } else { 55").is_ok(), false, "Failed to discard badly formatted branch");
 }
 
+/// Testing of parsing of scope exprs
+#[test]
+fn test_parse_scoped_exprs() {
+    // parse_scoped_exprs
+    assert_eq!(parse_scoped_exprs(" x y ").is_ok(), false, "Failed to reject scoped expr that was not correct");
+}
+
 /// Tests parametrized abstractions
 #[test]
 fn test_parse_abs() {
-    let mut a = Expr::Abs{params: vec![], body: vec![i(5)]};
+    let a = Expr::Abs{params: vec![], body: vec![i(5)]};
     assert_eq!(parse_expr("() { 5 }") , Ok(("", a)), "Failed to parse a simple abstraction");
 
-    let mut a = Expr::Abs{params: vec!["x".to_string(), "y".to_string()], body: vec![Expr::Ref("x".to_string()),Expr::Ref("y".to_string())]};
-    assert_eq!(parse_expr("(x,y) { x \n y\n }") , Ok(("", a)), "Failed to parse a more complex abstraction");
+    let a = Expr::Abs{params: vec![("x".to_string(), ParsedType::BaseType("T1".to_string())), ("y".to_string(), ParsedType::BaseType("bool".to_string()))], body: vec![Expr::Ref("x".to_string()),Expr::Ref("y".to_string())]};
+    assert_eq!(parse_expr("(x : T1, y : bool) { x \n y\n }") , Ok(("", a)), "Failed to parse a more complex abstraction #1");
 
     // test w/ no break between exprs (invalid)
-    assert_eq!(parse_expr("(x,y) { x y }").is_ok(), false, "Failed to reject poorly formatted abstraction body");
+    assert_eq!(parse_expr("(x : T1, y : T2) { x y }").is_ok(), false, "Failed to reject poorly formatted abstraction body");
 
     // test an abstraction w/ many linebreaks between exprs, and elsewhere too
-    let mut a = Expr::Abs{params: vec!["x".to_string(), "y".to_string()], body: vec![Expr::Ref("x".to_string()),Expr::Ref("y".to_string())]};
-    assert_eq!(parse_expr("(x,y) \n { \n x \n\n\n y }") , Ok(("", a)), "Failed to parse a more complex abstraction");
+    let a = Expr::Abs{params: vec![("x".to_string(), ParsedType::BaseType("T1".to_string())), ("y".to_string(), ParsedType::BaseType("T2".to_string()))], body: vec![Expr::Ref("x".to_string()),Expr::Ref("y".to_string())]};
+    assert_eq!(parse_expr("(x : T1, y : T2) \n { \n x \n\n\n y }") , Ok(("", a)), "Failed to parse a more complex abstraction #2");
 }
 
 /// Tests parsing for loops
@@ -886,14 +881,14 @@ fn test_parse_func() {
     );
 
     assert_eq!(
-        parse_expr("let id : int -> int = (x) { x }"),
+        parse_expr("let id : int -> int = (x : int) { x }"),
         Ok((
             "",
             Expr::Def{
                 name:   "id".to_string(),
                 typ:    ParsedType::Function(Box::new(ptype("int")), Box::new(ptype("int"))),
                 value:  Box::new(Expr::Abs{
-                    params: vec!["x".to_string()],
+                    params: vec![("x".to_string(), ParsedType::BaseType("int".to_string()))],
                     body:   vec![Expr::Ref("x".to_string())]
                 })
             }
@@ -903,7 +898,7 @@ fn test_parse_func() {
 
     // add test
     assert_eq!(
-        parse_expr("let add : (int,int) -> int = (_x,y) {\n_x + y\n}"),
+        parse_expr("let add : (int,int) -> int = (_x : int, y : int) {\n_x + y\n}"),
         Ok((
             "",
             Expr::Def{
@@ -916,7 +911,7 @@ fn test_parse_func() {
                     Box::new(ptype("int"))),
                 // _x + y
                 value:  Box::new(Expr::Abs{
-                    params: vec!["_x".to_string(), "y".to_string()],
+                    params: vec![("_x".to_string(), ParsedType::BaseType("int".to_string())), ("y".to_string(), ParsedType::BaseType("int".to_string()))],
                     body:   vec![Expr::BinOp{
                         operator: BOp::Add,
                         e1:       Box::new(Expr::Ref("_x".to_string())),

@@ -7,14 +7,15 @@ use typechecker::tc_program;
 
 fn main() {
     let prog = "\
-    let swap : (a, b) -> (b, a) = (x,y) { \
-        (y,x)\
+    let swap : (int, int) -> (int, int) = (x : int, y : int) { \n\
+        (y,x)\n\
     }\n";
     let res = match program(prog) {
         Ok((_, a)) => a,
         _          => vec![]
     };
-    println!("{:?}", res);
+    println!("\n\nPARSED PROGRAM: {:?}\n\n", res);
+    println!("TYPECHECKED PROGRAM: {:?}\n\n", tc_program(res));
 
     let r1 = program("(x:1, y:2)");
     let r2 = program("1+1\n");
