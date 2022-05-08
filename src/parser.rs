@@ -437,17 +437,11 @@ pub fn program(i: &str) -> IResult<&str, Vec<Expr>> {
     //     tuple((space0, line_ending))
     // ))))(i)
 
-
-    /*
-    1st try to parse many exprs followed by
-    2nd try to parse to a line break
-    3rd try to
-    */
-
     terminated(
-        many1(terminated(parse_expr, tuple((space0, line_ending)))),
+        // parse 1 or more expressions, terminated by 1 or more lines...
+        many1(terminated(parse_expr, many1(tuple((space0, line_ending))))),
+        // followed by any number of empty lines afterwards, if any
         tuple((multispace0, eof))
-        //many0(tuple((space0, line_ending)))
     )(i)
 }
 
@@ -919,4 +913,26 @@ fn test_parse_func() {
         )),
         "Failed to parse inc function"
     )
+}
+
+
+/// Tests multiple functions declared one after the other, w/ an app at the end
+#[test]
+fn test_parse_small_prog() {
+    let prog = "\
+    let swap : (int, int) -> (int, int) = (x : int, y : int) { \n\
+    \t(y,x)\n\
+    }\n\
+    \
+    let apply : (int -> int, int) -> int = (f: int -> int, v: int) {\n\
+    \tf(v)\n\
+    }\n\
+    \n\
+    let add: (int,int) -> int = (x: int, y: int) {\n\
+    \tx+y\n\
+    }\n\
+    \n\
+    apply(add,2)\n\
+    ";
+    assert_eq!(program(prog).is_ok(), true)
 }

@@ -28,16 +28,16 @@ fn main() {
     let swap : (int, int) -> (int, int) = (x : int, y : int) { \n\
     \t(y,x)\n\
     }\n\
-    \
+    \n\
     let apply : (int -> int, int) -> int = (f: int -> int, v: int) {\n\
     \tf(v)\n\
     }\n\
     \n\
-    let add: (int,int) -> int = (x: int, y: int) {\n\
-    \tx+y\n\
+    let double: int -> int = (x: int) {\n\
+    \tx*2\n\
     }\n\
     \n\
-    apply(add,2)\n\
+    apply(double,8)\n\
     ";
     verify(prog);
     // let res = match program(prog) {

@@ -427,10 +427,10 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
         // Yeah need to think about that a bit more.
         Expr::Abs{params: p, body: b} => {
 
-            let envOrig = env.clone();
+            let env_orig = env.clone();
 
             // get param types, and bind them in the env so we can check the body
-            let paramTypes : Vec<ParsedType> = p.into_iter().map(|(n,t)| {
+            let param_types : Vec<ParsedType> = p.into_iter().map(|(n,t)| {
                 // bind this pair in the env
                 env.insert(n,t.clone());
                 // return just the parsed type
@@ -442,9 +442,9 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
             // reset the env back
             // TODO (@montymxb) this copy / restore approach won't hold up well for large environments, may be best to just check which keys were present before, and keep them as they were
-            env = envOrig;
+            env = env_orig;
 
-            match paramTypes.len() {
+            match param_types.len() {
                 0 => {
                     // simple type w/ no params
                     return tc_pass(
@@ -452,10 +452,16 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
                         env);
 
                 },
-                _ => {
-                    // function type to construct
+                1 => {
+                    // single arg, no tuple needed for this function type
                     return tc_pass(
-                        Function(Box::new(ParsedType::Tuple(paramTypes)), Box::new(tb)),
+                        Function(Box::new(param_types[0].clone()), Box::new(tb)),
+                        env);
+                },
+                _ => {
+                    // 2 or more args, tuple needed for this function type
+                    return tc_pass(
+                        Function(Box::new(ParsedType::Tuple(param_types)), Box::new(tb)),
                         env);
                 }
             }

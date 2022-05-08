@@ -31,9 +31,28 @@ impl fmt::Display for ParsedType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &*self {
             ParsedType::BaseType(s)     => write!(f, "{}", s),
-            ParsedType::Tuple(v)        => write!(f, "({})", format!("{:?}",v)),
-            ParsedType::Function(t1,t2) => write!(f, "({}) -> ({})", format!("{}",t1), format!("{}",t2)),
-            ParsedType::NamedTuple(v)   => write!(f, "({})", format!("{:?}",v))
+            ParsedType::Tuple(v)        => {
+                write!(f, "(");
+                for (i,t) in v.into_iter().enumerate() {
+                    write!(f, "{}", t);
+                    if i < (v.len()-1) {
+                        write!(f, ", ");
+                    }
+                }
+                write!(f, ")")
+            },
+            ParsedType::Function(t1,t2) => write!(f, "{} -> {}", format!("{}",t1), format!("{}",t2)),
+            ParsedType::NamedTuple(v)   => {
+                write!(f, "(");
+                for (i,t) in v.into_iter().enumerate() {
+                    write!(f, "{}:{}", t.0, *t.1);
+                    if i < (v.len()-1) {
+                        write!(f, ", ");
+                    }
+                }
+                write!(f, ")")
+                // write!(f, "({})", format!("{:?}",v))
+            }
         }
     }
 }
