@@ -5,17 +5,47 @@ mod typechecker;
 use parser::program;
 use typechecker::tc_program;
 
+
+/// Verify a program through parsing & Typechecking
+fn verify(prog: &str) {
+    println!("Verifying program: \n\n{}", prog);
+    match program(prog) {
+        Ok((_, parsed_prog)) => {
+            println!("* program parsed successfully");
+            match tc_program(parsed_prog) {
+                Ok((_, s)) => {
+                    println!("* program typechecked successfully");
+                },
+                Err(e)  => println!("!! Failed to TC program: {:?}", e)
+            }
+        },
+        Err(e) => println!("!! Failed to parse program: {:?}", e)
+    }
+}
+
 fn main() {
     let prog = "\
     let swap : (int, int) -> (int, int) = (x : int, y : int) { \n\
-        (y,x)\n\
-    }\n";
-    let res = match program(prog) {
-        Ok((_, a)) => a,
-        _          => vec![]
-    };
-    println!("\n\nPARSED PROGRAM: {:?}\n\n", res);
-    println!("TYPECHECKED PROGRAM: {:?}\n\n", tc_program(res));
+    \t(y,x)\n\
+    }\n\
+    \
+    let apply : (int -> int, int) -> int = (f: int -> int, v: int) {\n\
+    \tf(v)\n\
+    }\n\
+    \n\
+    let add: (int,int) -> int = (x: int, y: int) {\n\
+    \tx+y\n\
+    }\n\
+    \n\
+    apply(add,2)\n\
+    ";
+    verify(prog);
+    // let res = match program(prog) {
+    //     Ok((_, a)) => a,
+    //     _          => vec![]
+    // };
+    // println!("\n\nPARSED PROGRAM: {:?}\n\n", res);
+    // println!("TYPECHECKED PROGRAM: {:?}\n\n", tc_program(res));
 
     let r1 = program("(x:1, y:2)");
     let r2 = program("1+1\n");
