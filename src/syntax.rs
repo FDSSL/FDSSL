@@ -21,7 +21,7 @@ pub enum Type {
 #[derive(Debug, PartialEq, Clone)]
 pub enum ParsedType {
     BaseType(String),
-    Tuple(Vec<Box<ParsedType>>),
+    Tuple(Vec<ParsedType>),
     NamedTuple(Vec<(String, Box<ParsedType>)>), // stores indexed types for named tuples
     Function(Box<ParsedType>, Box<ParsedType>),
 }
@@ -57,6 +57,31 @@ pub enum BOp {
     BitAnd,
     BitOr,
     BitXor,
+}
+
+impl fmt::Display for BOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            BOp::Add => "+",
+            BOp::Sub => "-",
+            BOp::Mul => "*",
+            BOp::Div => "/",
+            BOp::Mod => "%",
+            BOp::And => "&&",
+            BOp::Or => "||",
+            BOp::Compose => ".",
+            BOp::Eq => "==",
+            BOp::Neq => "!=",
+            BOp::Gt => ">",
+            BOp::Gte => ">=",
+            BOp::Lt => "<",
+            BOp::Lte => "<=",
+            BOp::BitAnd => "&",
+            BOp::BitOr => "|",
+            BOp::BitXor => "^",
+        };
+        write!(f, "{}", s)
+    }
 }
 
 #[derive(Debug,PartialEq,Clone,Copy)]
