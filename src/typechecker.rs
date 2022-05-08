@@ -59,7 +59,8 @@ use syntax::ParsedType::Function;
 use syntax::ParsedType::BaseType;
 use syntax::AccessType::Name;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
 
 // Type env, contains bindings of 'things' to types...these can be Exprs or Names
 // w/ a HashMap our insertions & lookups pretty bad at O(n), but that's in the worst possible case, on average we should be seeing O(1)
@@ -86,19 +87,19 @@ pub type TCResult = Result<TypeChecked, TCError>;
 
 /// Marks a value of given type w/ a valid type
 fn tc_pass(p: ParsedType, t: TCEnv) -> TCResult {
-    return Ok((p,t));
+    Ok((p,t))
 }
 
 /// Fails the typechecker w/ an error message
-fn tc_fail(e: &str) -> TCResult {
-    return Err(e.to_string());
+fn tc_fail(e: String) -> TCResult {
+    Err(e)
 }
 
 /// Looks up a parsed type in the TC env, potentially failing
 fn tc_lookup(n: &str, env: &TCEnv) -> Result<ParsedType,TCError> {
     match env.get(n) {
-        Some(p) => Ok(p.clone()),
-        None    => Err(format!("Non-existant binding '{n}' referenced, perhaps you meant to declare it first with 'let' or 'mut'?"))
+        Some(v) => Ok((*v).clone()),
+        None => Err(format!("Non-existant binding '{}' referenced, perhaps you meant to declare it first with 'let' or 'mut'?", n)),
     }
 }
 
@@ -112,24 +113,23 @@ pub fn tc_program(p: Program) -> TCResult {
 /// Verifies all of them before returning the result of the last Expr
 /// Expects a body of 1 or more Exprs to verify
 fn tc_body(body: Vec<Expr>, env: TCEnv) -> TCResult {
-    if body.len() <= 0 {
+    if body.is_empty() {
         // must have something to work with
-        tc_fail("Unable to typecheck an empty body!")
+        tc_fail("Unable to typecheck an empty body!".to_string())
 
     } else {
-        // typecheck each expr to make sure no errors occur normally
-        let mut result : TCResult = Err("".to_string());
-        for expr in body {
-            result = tc_expr(expr, env);
-            match result {
-                // update env on valid check
-                Ok((t,env2))   => return Ok((t,env2)),
-                // propagate any error up
-                Err(s)      => return Err(s)
-            };
-        }
-        // only return the result of the last check
-        result
+        body.into_iter().fold(
+            Ok((BaseType("".to_string()), env)),
+            |acc, elt| {
+                // Looks like `bind` huh?
+                if let Ok((_, env)) = acc {
+                    tc_expr(elt, env)
+                }
+                else {
+                    acc
+                }
+            }
+        )
 
     }
 }
@@ -149,10 +149,6 @@ fn mk_func_typ(t1: ParsedType, t2: ParsedType) -> ParsedType {
     Function(Box::new(t1), Box::new(t2))
 }
 
-/// Helper to make a tuple type
-fn mk_tup_typ(typs: Vec<ParsedType>) -> ParsedType {
-    Tuple(typs.into_iter().map(|t| Box::new(t)).collect())
-}
 
 /// Helper to make a base type from an &str
 fn typ(s: &str) -> ParsedType {
@@ -161,102 +157,70 @@ fn typ(s: &str) -> ParsedType {
 
 /// Helper to produce a homogenous binary function type
 fn mk_bin_func(t: ParsedType) -> ParsedType {
-    let t1 = t.clone();
-    let t2 = t.clone();
-    let t3 = t.clone();
-    mk_func_typ(mk_tup_typ(vec![t1,t2]), t3)
+    mk_func_typ(Tuple(vec![t.clone(),t.clone()]), t)
 }
 
 /// Returns the type that corresponds to a given BinOp
 /// TODO, needs args types to determine overloaded arithmetic types
-fn bop_type(bop: BOp, a1t: &ParsedType, a2t: &ParsedType) ->  Result<ParsedType,TCError> {
+fn bop_type(bop: syntax::BOp, a1t: &ParsedType, a2t: &ParsedType) -> Result<ParsedType, TCError> {
 
-    let argTypesMatch = *a1t == *a2t;
+    let args_match = *a1t == *a2t;
+    let mut types = HashSet::new();
+    types.insert("int".to_string());
+    types.insert("float".to_string());
+    types.insert("double".to_string());
+    types.insert("bool".to_string());
 
-    let a1 = a1t.clone();
-    let a2 = a2t.clone();
-
-    // extract type names of base types, nothing else should go here
-    match (a1,a2) {
-        (BaseType(b1),BaseType(b2)) => {
-
-            // so many clones...
-            let a11 = a1t.clone();
-            let a1c = a1t.clone();
-            let a22 = a2t.clone();
-
-            match (bop, b1.as_str(), b2.as_str(), argTypesMatch) {
-                (Add, "int", "int", _)       => Ok(mk_bin_func(a11)),
-                (Add, "float", "float", _)   => Ok(mk_bin_func(a11)),
-                (Add, "double", "double", _) => Ok(mk_bin_func(a11)),
-        
-                (Sub, "int", "int", _)       => Ok(mk_bin_func(a11)),
-                (Sub, "float", "float", _)   => Ok(mk_bin_func(a11)),
-                (Sub, "double", "double", _) => Ok(mk_bin_func(a11)),
-        
-                (Mul, "int", "int", _)       => Ok(mk_bin_func(a11)),
-                (Mul, "float", "float", _)   => Ok(mk_bin_func(a11)),
-                (Mul, "double", "double", _) => Ok(mk_bin_func(a11)),
-        
-                (Div, "int", "int", _)       => Ok(mk_bin_func(a11)),
-                (Div, "float", "float", _)   => Ok(mk_bin_func(a11)),
-                (Div, "double", "double", _) => Ok(mk_bin_func(a11)),
-        
-                // modolu only w/ ints
-                (Mod, "int", "int", _)    => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), a1c)),
-                (Mod, "float", "int", _)  => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), a1c)),
-                (Mod, "double", "int", _) => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), a1c)),
-        
-                (And, "bool", "bool", _) => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), a1c)),
-                (Or, "bool", "bool", _)  => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), a1c)),
-        
-                // TODO Compose is not quite done yet
-                (Compose, _, _, _)  => {
-                    match(a1t, a2t) {
-                        (Function(a1,a2), Function(b1,b2))  => {
-
-                            let a1c2 = *a1.clone();
-                            let b2c2 = *a1.clone();
-
-                            if *a2 == *b1 {
-                                Ok(mk_func_typ(a1c2, b2c2))
-                            } else {
-                                // better error here
-                                Err(format!("Could not compose {} -> {} with {} -> {}! The result type of the 2nd must be the param type of the 1st.",a1,a2,b1,b2))
-                            }
-                        },
-                        _ => Err("Can only compose function types!".to_string())
-                    }
-                },
-        
-                // eq for any 2 types
-                (Eq, _, _, true)   => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-                (Neq, _, _, true)  => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-        
-                (Gt, "int", "int", _)         => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-                (Gt, "float", "float", _)     => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-                (Gt, "double", "double", _)   => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-        
-                (Gte, "int", "int", _)         => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-                (Gte, "float", "float", _)     => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-                (Gte, "double", "double", _)   => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-        
-                (Lt, "int", "int", _)         => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-                (Lt, "float", "float", _)     => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-                (Lt, "double", "double", _)   => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-        
-                (Lte, "int", "int", _)         => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-                (Lte, "float", "float", _)     => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-                (Lte, "double", "double", _)   => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), typ("bool"))),
-        
-                (BitAnd, "int", "int", _)   => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), a1c)),
-                (BitOr, "int", "int", _)    => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), a1c)),
-                (BitXor, "int", "int", _)   => Ok(mk_func_typ(mk_tup_typ(vec![a11,a22]), a1c)),
-
-                _ => Err("Unrecognized BinOp to analyze!".to_string())
+    match (a1t, a2t) {
+        (BaseType(b1), BaseType(b2)) => {
+            if ! types.contains(b1) {
+                Err(format!("Type {} is not supported by binary operations", b1))
+            }
+            else if ! types.contains(b2) {
+                Err(format!("Type {} is not supported by binary operations", b2))
+            }
+            else {
+                let (arg1, arg2) = ((*a1t).clone(), (*a2t).clone());
+                match (bop, args_match, b1.as_str(), b2.as_str()) {
+                    (syntax::BOp::Add, true, _, _) => Ok(mk_bin_func(arg1)),
+                    (syntax::BOp::Sub, true, _, _) => Ok(mk_bin_func(arg1)),
+                    (syntax::BOp::Mul, true, _, _) => Ok(mk_bin_func(arg1)),
+                    (syntax::BOp::Div, true, _, _) => Ok(mk_bin_func(arg1)),
+                    (syntax::BOp::Eq, true, _, _) => Ok(mk_func_typ(Tuple(vec![arg1, arg2]), typ("bool"))),
+                    (syntax::BOp::Neq, true, _, _) => Ok(mk_func_typ(Tuple(vec![arg1, arg2]), typ("bool"))),
+                    (syntax::BOp::Mod, _, "bool", "int") => Err("bool is not supported as an argument for the mod operator".to_string()),
+                    (syntax::BOp::Mod, _, _, "int") => Ok(mk_func_typ(Tuple(vec![arg1.clone(),arg2]), arg1)),
+                    (syntax::BOp::And, true, _, "bool") => Ok(mk_func_typ(Tuple(vec![arg1.clone(),arg2]), arg1)),
+                    (syntax::BOp::Or, true, _, "bool")  => Ok(mk_func_typ(Tuple(vec![arg1.clone(),arg2]), arg1)),
+                    (syntax::BOp::BitAnd, true, _, "int") => Ok(mk_func_typ(Tuple(vec![arg1.clone(),arg2]), arg1)),
+                    (syntax::BOp::BitOr, true, _, "int") => Ok(mk_func_typ(Tuple(vec![arg1.clone(),arg2]), arg1)),
+                    (syntax::BOp::BitXor, true, _, "int") => Ok(mk_func_typ(Tuple(vec![arg1.clone(),arg2]), arg1)),
+                    (syntax::BOp::Gt, true, _, "bool") => Err(format!("bool not supported with {} operator", bop)),
+                    (syntax::BOp::Gte, true, _, "bool") => Err(format!("bool not supported with {} operator", bop)),
+                    (syntax::BOp::Lte, true, _, "bool") => Err(format!("bool not supported with {} operator", bop)),
+                    (syntax::BOp::Lt, true, _, "bool") => Err(format!("bool not supported with {} operator", bop)),
+                    (syntax::BOp::Gt, true, _, _) => Ok(mk_func_typ(Tuple(vec![arg1,arg2]), typ("bool"))),
+                    (syntax::BOp::Gte, true, _, _) => Ok(mk_func_typ(Tuple(vec![arg1,arg2]), typ("bool"))),
+                    (syntax::BOp::Lte, true, _, _) => Ok(mk_func_typ(Tuple(vec![arg1,arg2]), typ("bool"))),
+                    (syntax::BOp::Lt, true, _, _) => Ok(mk_func_typ(Tuple(vec![arg1,arg2]), typ("bool"))),
+                    _ => Err(format!("Operator does not support argument types {} {}", *a1t, *a2t)),
+                }
+            }
+        }
+        (Function(args1, ret1), Function(args2, ret2)) => {
+            if bop == BOp::Compose {
+                if **ret2 == **args1 {
+                    Ok(mk_func_typ((**args2).clone(), (**ret1).clone()))
+                }
+                else {
+                    Err(format!("Return type {} is not the same as argument type {} in function composition", **ret2, **args1))
+                }
+            }
+            else {
+                Err("Only the composition operator can take function arguments".to_string())
             }
         },
-        _ => Err("Bad argument passed".to_string())
+        _ => Err("asd".to_string())
     }
 }
 
@@ -345,7 +309,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
         Expr::Ref(r) => {
             match env.get(&r) {
                 Some(t) => tc_pass(t.clone(), env),
-                None    => tc_fail(format!("Undefined reference '{r}'!").as_str())
+                None    => tc_fail(format!("Undefined reference '{r}'!"))
             }
         },
 
@@ -367,7 +331,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
             if t != t1 {
                 // fail if the types don't match
-                return tc_fail(format!("Definition of '{n}' has type '{t}', but was assigned to a value of type '{t1}'").as_str());
+                return tc_fail(format!("Definition of '{n}' has type '{t}', but was assigned to a value of type '{t1}'"));
 
             } else {
                 // valid, add this name & type combo to our env & continue
@@ -401,7 +365,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
             if t != t1 {
                 // fail if the types don't match
-                return tc_fail(format!("Definition of '{n}' has type '{t}', but was assigned to a value of type '{t1}'").as_str());
+                return tc_fail(format!("Definition of '{n}' has type '{t}', but was assigned to a value of type '{t1}'"));
 
             } else {
                 // valid, add this name & type combo to our env & continue
@@ -430,9 +394,9 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
             let t1 = tc_lookup(&n, &env)?;
             let (t2,env) = tc_expr(*v, env)?;
             if t1 == t2 {
-                return tc_pass(t1,env);
+                tc_pass(t1,env)
             } else {
-                return tc_fail(format!("Definition of '{n}' has type '{t1}', but was assigned to a value of type '{t2}'").as_str());
+                tc_fail(format!("Definition of '{n}' has type '{t1}', but was assigned to a value of type '{t2}'"))
             }
         },
 
@@ -491,7 +455,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
                 _ => {
                     // function type to construct
                     return tc_pass(
-                        Function(Box::new(ParsedType::Tuple(paramTypes.into_iter().map(|p| Box::new(p)).collect())), Box::new(tb)),
+                        Function(Box::new(ParsedType::Tuple(paramTypes)), Box::new(tb)),
                         env);
                 }
             }
@@ -534,7 +498,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
             } else {
                 // tuple type
-                arg_type = ParsedType::Tuple(argTypeList.into_iter().map(|t| Box::new(t)).collect());
+                arg_type = ParsedType::Tuple(argTypeList);
 
             }
 
@@ -544,20 +508,20 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
                     if *ft1 == arg_type {
                         // types of args match param types
                         // produce resultant type
-                        return tc_pass(
+                        tc_pass(
                             *ft2,
                             env
-                        );
+                        )
 
                     } else {
                         // mismatch
-                        return tc_fail(format!("Function '{f}' of type '{t1c}' applied to args of type '{arg_type}'. Consider changing the args to match the function type, or change the type of the function to fix this.").as_str());
+                        tc_fail(format!("Function '{f}' of type '{t1c}' applied to args of type '{arg_type}'. Consider changing the args to match the function type, or change the type of the function to fix this."))
                     }
 
                 },
                 _  => {
                     // auto fail, no parameters for the type of this function!
-                    return tc_fail(format!("Function '{f}' of type '{t1}' is applied to arguments, but has no parameters in its type. Remove the arguments to fix this problem, or change the type of the function to accept arguments.").as_str());
+                    tc_fail(format!("Function '{f}' of type '{t1}' is applied to arguments, but has no parameters in its type. Remove the arguments to fix this problem, or change the type of the function to accept arguments."))
 
                 }
             }
@@ -588,17 +552,17 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
             match btyp {
                 Function(tp, tr)    => {
                     // compare w/ args
-                    if Tuple(vec![Box::new(t1),Box::new(t2)]) == *tp {
+                    if Tuple(vec![t1,t2]) == *tp {
                         tc_pass(
                             *tr,
                             e2
                         )
                     } else {
                         // TODO not a very descriptive error message, needs to be improved
-                        tc_fail("Bad binop!")
+                        tc_fail("Bad binop!".to_string())
                     }
                 },
-                _ => tc_fail("BinOps may only be function types, '{b}' was not!")
+                _ => tc_fail("BinOps may only be function types, '{b}' was not!".to_string())
             }
         },
 
@@ -629,11 +593,11 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
                     } else {
                         // mismatch
-                        return tc_fail(format!("Unary operator '{b}' was expecting an argument of type '{f1}' but got an argument of type '{t2c}' instead").as_str());
+                        tc_fail(format!("Unary operator '{b}' was expecting an argument of type '{f1}' but got an argument of type '{t2c}' instead"))
 
                     }
                 },
-                _ => tc_fail(format!("Unary operator '{b}' was not a function type as expected, was instead '{uopTyp}'").as_str())
+                _ => tc_fail(format!("Unary operator '{b}' was not a function type as expected, was instead '{uopTyp}'"))
             }
         },
 
@@ -653,7 +617,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
         Expr::Branch{condition: c, b1: b1, b2: b2} => {
             let (t1,env1) = tc_expr(*c, env)?;
             if t1 != BaseType("bool".to_string()) {
-                return tc_fail(format!("'If' was expecting an expression of type 'bool', but got an expression of type '{t1}' instead").as_str());
+                return tc_fail(format!("'If' was expecting an expression of type 'bool', but got an expression of type '{t1}' instead"));
 
             } else {
                 // verify the types of b1 & b2 match
@@ -669,7 +633,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
                 } else {
                     // body types do NOT match, fail
-                    return tc_fail(format!("'If' branches were expected to have the same type, but have differing types of '{tb1}' and '{tb2}' instead").as_str());
+                    return tc_fail(format!("'If' branches were expected to have the same type, but have differing types of '{tb1}' and '{tb2}' instead"));
 
                 }
             }
@@ -716,18 +680,18 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
                     match t {
                         NamedTuple(namedTypes)  => {
                             for (name,typ) in namedTypes {
-                                if name == prop {
+                                if *name == prop {
                                     // immediately produce this type w/out any other work
                                     return tc_pass(*typ, env);
                                 }
                             }
-                            tc_fail(format!("Property '{}' on tuple '{}' is not defined", prop, n).as_str())
+                            tc_fail(format!("Property '{}' on tuple '{}' is not defined", prop, n))
                         },
                         // any other as a fail case
-                        _ => tc_fail(format!("Incorrect access of tuple '{}'!", n).as_str())
+                        _ => tc_fail(format!("Incorrect access of tuple '{}'!", n))
                     }
                 },
-                _ => tc_fail(format!("Invalid tuple index case for '{n}', not fully implemented yet!").as_str())
+                _ => tc_fail(format!("Invalid tuple index case for '{n}', not fully implemented yet!"))
             }
         },
 
@@ -737,7 +701,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
             for e in v {
                 let (et,env1) = tc_expr(e, env)?;
-                tup_type.push(Box::new(et));
+                tup_type.push(et);
                 env = env1;
             }
 
@@ -747,7 +711,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
 
         // fill in the rest here, and just call out the relevant handler
-        _ => tc_fail(format!("Unrecognized expression '{:?}'", e).as_str())
+        _ => tc_fail(format!("Unrecognized expression '{:?}'", e))
     };
     return res;
 }

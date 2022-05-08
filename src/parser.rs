@@ -6,7 +6,6 @@ use syntax::AccessType;
 use syntax::BOp;
 use syntax::UOp;
 extern crate itertools;
-use itertools::Itertools;
 
 extern crate nom;
 
@@ -174,9 +173,7 @@ fn parse_type_tuple(i: &str) -> IResult<&str, ParsedType> {
         );
     map(
         parser,
-        |elts: Vec<ParsedType>| ParsedType::Tuple(
-            elts.into_iter().map(|e| Box::new(e)).collect()
-        )
+        |elts: Vec<ParsedType>| ParsedType::Tuple(elts)
     )(i)
 }
 
