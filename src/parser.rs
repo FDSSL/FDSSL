@@ -668,14 +668,14 @@ fn test_parse_type_function() {
     assert_eq!(
         parse_type("(int,bool) -> (A, B -> (C,D -> F))"),
         Ok(("", ParsedType::Function(
-            Box::new(ParsedType::Tuple(vec![Box::new(ptype("int")), Box::new(ptype("bool"))])),
-            Box::new(ParsedType::Tuple(vec![Box::new(ptype("A")), Box::new(ParsedType::Function(
+            Box::new(ParsedType::Tuple(vec![ptype("int"), ptype("bool")])),
+            Box::new(ParsedType::Tuple(vec![ptype("A"), ParsedType::Function(
                 Box::new(ptype("B")),
-                Box::new(ParsedType::Tuple(vec![Box::new(ptype("C")), Box::new(ParsedType::Function(
+                Box::new(ParsedType::Tuple(vec![ptype("C"), ParsedType::Function(
                     Box::new(ptype("D")),
-                    Box::new(ptype("F"))))]
+                    Box::new(ptype("F")))]
                 ))
-            ))]))
+            )]))
         ))),
         "Failed to parse basic type"
     );
@@ -688,8 +688,8 @@ fn test_parse_type_tuple() {
                Ok(("",
                    ParsedType::Tuple(
                        vec![
-                           Box::new(ptype("int")),
-                           Box::new(ptype("int")),
+                           ptype("int"),
+                           ptype("int"),
                        ]
                     )
 
@@ -700,9 +700,9 @@ fn test_parse_type_tuple() {
                Ok(("",
                    ParsedType::Tuple(
                        vec![
-                           Box::new(ParsedType::BaseType("int".to_string())),
-                           Box::new(ParsedType::BaseType("int".to_string())),
-                           Box::new(ParsedType::BaseType("bool".to_string())),
+                           ParsedType::BaseType("int".to_string()),
+                           ParsedType::BaseType("int".to_string()),
+                           ParsedType::BaseType("bool".to_string()),
                        ]
                     )
 
@@ -903,8 +903,8 @@ fn test_parse_func() {
                 // (int,int) -> int
                 typ:    ParsedType::Function(
                     Box::new(ParsedType::Tuple(
-                        vec![Box::new(ptype("int")),
-                        Box::new(ptype("int"))])),
+                        vec![ptype("int"),
+                            ptype("int")])),
                     Box::new(ptype("int"))),
                 // _x + y
                 value:  Box::new(Expr::Abs{
