@@ -160,6 +160,21 @@ fn mk_bin_func(t: ParsedType) -> ParsedType {
     mk_func_typ(Tuple(vec![t.clone(),t.clone()]), t)
 }
 
+fn op_num_type(bop: & syntax::BOp) -> bool {
+    match bop {
+        syntax::BOp::Mod => true,
+        syntax::BOp::Gt => true,
+        syntax::BOp::Gte => true,
+        syntax::BOp::Lte => true,
+        syntax::BOp::Lt => true,
+        syntax::BOp::Add => true,
+        syntax::BOp::Sub => true,
+        syntax::BOp::Mul => true,
+        syntax::BOp::Div => true,
+        _ => false,
+    }
+}
+
 /// Returns the type that corresponds to a given BinOp
 /// TODO, needs args types to determine overloaded arithmetic types
 fn bop_type(bop: syntax::BOp, a1t: &ParsedType, a2t: &ParsedType) -> Result<ParsedType, TCError> {
@@ -179,6 +194,9 @@ fn bop_type(bop: syntax::BOp, a1t: &ParsedType, a2t: &ParsedType) -> Result<Pars
             else if ! types.contains(b2) {
                 Err(format!("Type {} is not supported by binary operations", b2))
             }
+            else if (b1 == "bool" || b2 == "bool") && op_num_type(&bop) {
+                Err(format!("Operator {} does not support bool as an argument", bop))
+            }
             else {
                 let (arg1, arg2) = ((*a1t).clone(), (*a2t).clone());
                 match (bop, args_match, b1.as_str(), b2.as_str()) {
@@ -188,17 +206,12 @@ fn bop_type(bop: syntax::BOp, a1t: &ParsedType, a2t: &ParsedType) -> Result<Pars
                     (syntax::BOp::Div, true, _, _) => Ok(mk_bin_func(arg1)),
                     (syntax::BOp::Eq, true, _, _) => Ok(mk_func_typ(Tuple(vec![arg1, arg2]), typ("bool"))),
                     (syntax::BOp::Neq, true, _, _) => Ok(mk_func_typ(Tuple(vec![arg1, arg2]), typ("bool"))),
-                    (syntax::BOp::Mod, _, "bool", "int") => Err("bool is not supported as an argument for the mod operator".to_string()),
                     (syntax::BOp::Mod, _, _, "int") => Ok(mk_func_typ(Tuple(vec![arg1.clone(),arg2]), arg1)),
                     (syntax::BOp::And, true, _, "bool") => Ok(mk_func_typ(Tuple(vec![arg1.clone(),arg2]), arg1)),
                     (syntax::BOp::Or, true, _, "bool")  => Ok(mk_func_typ(Tuple(vec![arg1.clone(),arg2]), arg1)),
                     (syntax::BOp::BitAnd, true, _, "int") => Ok(mk_func_typ(Tuple(vec![arg1.clone(),arg2]), arg1)),
                     (syntax::BOp::BitOr, true, _, "int") => Ok(mk_func_typ(Tuple(vec![arg1.clone(),arg2]), arg1)),
                     (syntax::BOp::BitXor, true, _, "int") => Ok(mk_func_typ(Tuple(vec![arg1.clone(),arg2]), arg1)),
-                    (syntax::BOp::Gt, true, _, "bool") => Err(format!("bool not supported with {} operator", bop)),
-                    (syntax::BOp::Gte, true, _, "bool") => Err(format!("bool not supported with {} operator", bop)),
-                    (syntax::BOp::Lte, true, _, "bool") => Err(format!("bool not supported with {} operator", bop)),
-                    (syntax::BOp::Lt, true, _, "bool") => Err(format!("bool not supported with {} operator", bop)),
                     (syntax::BOp::Gt, true, _, _) => Ok(mk_func_typ(Tuple(vec![arg1,arg2]), typ("bool"))),
                     (syntax::BOp::Gte, true, _, _) => Ok(mk_func_typ(Tuple(vec![arg1,arg2]), typ("bool"))),
                     (syntax::BOp::Lte, true, _, _) => Ok(mk_func_typ(Tuple(vec![arg1,arg2]), typ("bool"))),
@@ -232,11 +245,11 @@ fn uop_type(uop: UOp, argType: ParsedType) -> Result<ParsedType, TCError> {
     match argType {
         BaseType(n) => {
             match (uop, n.as_str()) {
-                (Negative, "int")      => Ok(mk_func_typ(atc, atc2)),
-                (Negative, "float")    => Ok(mk_func_typ(atc, atc2)),
-                (Negative, "double")   => Ok(mk_func_typ(atc, atc2)),
+                (syntax::UOp::Negative, "int")      => Ok(mk_func_typ(atc, atc2)),
+                (syntax::UOp::Negative, "float")    => Ok(mk_func_typ(atc, atc2)),
+                (syntax::UOp::Negative, "double")   => Ok(mk_func_typ(atc, atc2)),
         
-                (Negate, "bool")   => Ok(mk_func_typ(atc, atc2)),
+                (syntax::UOp::Negate, "bool")   => Ok(mk_func_typ(atc, atc2)),
 
                 _ => Err(format!("Invalid matching of unary op {uop} with an argument type {n}"))
             }
