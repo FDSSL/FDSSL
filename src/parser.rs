@@ -277,7 +277,7 @@ fn parse_branch(input: &str) -> IResult<&str, Expr> {
     let (input,b1)      = parse_scoped_exprs(input)?;
     let (input,_)       = preceded(space0, tag("else"))(input)?;
     let (input,b2)      = parse_scoped_exprs(input)?;
-    return Ok((input, Expr::Branch{condition: Box::new(cond), b1: b1, b2: b2}))
+    Ok((input, Expr::Branch{condition: Box::new(cond), b1: b1, b2: b2}))
 }
 
 /// Parses a parameterized abstraction

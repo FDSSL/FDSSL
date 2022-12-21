@@ -59,6 +59,8 @@ use syntax::ParsedType::Function;
 use syntax::ParsedType::BaseType;
 use syntax::AccessType::Name;
 
+use itertools::EitherOrBoth::Both;
+use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
 
 
@@ -106,20 +108,20 @@ fn tc_lookup(n: &str, env: &TCEnv) -> Result<ParsedType,TCError> {
 /// Attempts to typecheck a program
 pub fn tc_program(p: Program) -> TCResult {
     let env : TCEnv = HashMap::new();
-    tc_body(p, env)
+    tc_body(p, &env)
 }
 
 /// Typechecks a vector of Exprs w/ a given environment
 /// Verifies all of them before returning the result of the last Expr
 /// Expects a body of 1 or more Exprs to verify
-fn tc_body(body: Vec<Expr>, env: TCEnv) -> TCResult {
+fn tc_body(body: Vec<Expr>, env: &TCEnv) -> TCResult {
     if body.is_empty() {
         // must have something to work with
         tc_fail("Unable to typecheck an empty body!".to_string())
 
     } else {
         body.into_iter().fold(
-            Ok((BaseType("".to_string()), env)),
+            Ok((BaseType("".to_string()), env.clone())),
             |acc, elt| {
                 // Looks like `bind` huh?
                 if let Ok((_, env)) = acc {
@@ -239,19 +241,19 @@ fn bop_type(bop: syntax::BOp, a1t: &ParsedType, a2t: &ParsedType) -> Result<Pars
 
 /// Returns the type that corresponds to a given Unary op
 /// TODO, needs args type to determine overloaded arithmetic types
-fn uop_type(uop: UOp, argType: ParsedType) -> Result<ParsedType, TCError> {
-    let atc = argType.clone();
-    let atc2 = argType.clone();
-    match argType {
+fn uop_type(uop: UOp, arg: ParsedType) -> Result<ParsedType, TCError> {
+    let arg1 = arg.clone();
+    let arg2 = arg.clone();
+    match arg {
         BaseType(n) => {
             match (uop, n.as_str()) {
-                (syntax::UOp::Negative, "int")      => Ok(mk_func_typ(atc, atc2)),
-                (syntax::UOp::Negative, "float")    => Ok(mk_func_typ(atc, atc2)),
-                (syntax::UOp::Negative, "double")   => Ok(mk_func_typ(atc, atc2)),
+                (Negative, "int")      => Ok(mk_func_typ(arg1, arg2)),
+                (Negative, "float")    => Ok(mk_func_typ(arg1, arg2)),
+                (Negative, "double")   => Ok(mk_func_typ(arg1, arg2)),
         
-                (syntax::UOp::Negate, "bool")   => Ok(mk_func_typ(atc, atc2)),
+                (Negate, "bool")   => Ok(mk_func_typ(arg1, arg2)),
 
-                _ => Err(format!("Invalid matching of unary op {uop} with an argument type {n}"))
+                _ => Err(format!("Invalid marghing of unary op {uop} with an argument type {n}"))
             }
         },
         _ => Err("Cannot perform unary operation on anything other than a Base type!".to_string())
@@ -284,7 +286,7 @@ THEN
 
 // Typecheck general expressions
 fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
-    let res = match e {
+    match e {
 
         // Int
         Expr::I(_) => {
@@ -344,15 +346,15 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
             if t != t1 {
                 // fail if the types don't match
-                return tc_fail(format!("Definition of '{n}' has type '{t}', but was assigned to a value of type '{t1}'"));
+                tc_fail(format!("Definition of '{n}' has type '{t}', but was assigned to a value of type '{t1}'"))
 
             } else {
                 // valid, add this name & type combo to our env & continue
                 env1.insert(n,t.clone());
-                return tc_pass(
+                tc_pass(
                     t,
                     env1
-                );
+                )
             }
         },
 
@@ -378,15 +380,12 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
             if t != t1 {
                 // fail if the types don't match
-                return tc_fail(format!("Definition of '{n}' has type '{t}', but was assigned to a value of type '{t1}'"));
+                tc_fail(format!("Definition of '{n}' has type '{t}', but was assigned to a value of type '{t1}'"))
 
             } else {
                 // valid, add this name & type combo to our env & continue
                 env1.insert(n,t.clone());
-                return tc_pass(
-                    t,
-                    env1
-                )
+                tc_pass(t, env1)
             }
         },
 
@@ -440,42 +439,42 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
         // Yeah need to think about that a bit more.
         Expr::Abs{params: p, body: b} => {
 
-            let env_orig = env.clone();
-
-            // get param types, and bind them in the env so we can check the body
-            let param_types : Vec<ParsedType> = p.into_iter().map(|(n,t)| {
-                // bind this pair in the env
-                env.insert(n,t.clone());
-                // return just the parsed type
-                t
-            }).collect();
+            let old_binding : Vec<(&String, ParsedType)> = p.iter().filter_map(
+                |(n,t)| {
+                    let oldval = env.insert(n.clone(), t.clone())?;
+                    Some((n, oldval))
+                }
+            ).collect();
 
             // get type of the body (return type), ignoring effect on env
-            let (tb,_) = tc_body(b,env)?;
+            let (tb,_) = tc_body(b, &env)?;
 
             // reset the env back
-            // TODO (@montymxb) this copy / restore approach won't hold up well for large environments, may be best to just check which keys were present before, and keep them as they were
-            env = env_orig;
+            // Do not believe clippy. The iterator is collected above to insert the parameters into env.
+            old_binding.into_iter().for_each(|(n,t)| {
+                env.insert(n.clone(), t);
+            });
 
-            match param_types.len() {
+            let p : Vec<ParsedType> = p.into_iter().map(|(_,t)| t).collect();
+
+            match p.len() {
                 0 => {
                     // simple type w/ no params
-                    return tc_pass(
-                        tb,
-                        env);
-
+                    tc_pass(tb, env)
                 },
                 1 => {
                     // single arg, no tuple needed for this function type
-                    return tc_pass(
-                        Function(Box::new(param_types[0].clone()), Box::new(tb)),
-                        env);
+                    tc_pass(
+                        Function(Box::new(p[0].clone()), Box::new(tb)),
+                        env
+                    )
                 },
                 _ => {
-                    // 2 or more args, tuple needed for this function type
-                    return tc_pass(
-                        Function(Box::new(ParsedType::Tuple(param_types)), Box::new(tb)),
-                        env);
+                    // function type to construct
+                    tc_pass(
+                        Function(Box::new(ParsedType::Tuple(p)), Box::new(tb)),
+                        env
+                    )
                 }
             }
         },
@@ -496,54 +495,64 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
         // Function application
         Expr::App{fname: f, arguments: args} => {
             // get func type for app
-            let t1 = tc_lookup(&f, &env)?;
+            //
+            let res = tc_lookup(&f, &env)?;
+            let (parms, retval) = if let Function(p,r) = res {
+                (p,r)
+            }
+            else {
+                return tc_fail(format!("Variable {} is not a function!", f));
+            };
+
+
+
+            // let (parms, retval) = match res {
+            //     Function(p,r) => (p,r),
+            //     _ => tc_fail(format!("Variable {} is not a function!", f))
+            // };
+
             // typecheck each arg, and produce a list of arg types
-            let mut argTypeList = vec![];
-            for e in args {
-                let (t,env2) = tc_expr(e,env)?;
-                argTypeList.push(t);
-                env = env2;
-            }
+            //let args_types = args.into_iter().map(|a| tc_expr());
 
-            let arg_type : ParsedType;
-
-            if argTypeList.len() == 1 {
-                // just a base type
-                //argType = argTypeList.pop();
-                match argTypeList.pop() {
-                    Some(at)    => arg_type = at,
-                    None        => return Err("Failed to produce valid arg list".to_string())
-                }
-
-            } else {
-                // tuple type
-                arg_type = ParsedType::Tuple(argTypeList);
-
-            }
-
-            let t1c = t1.clone();
-            match t1 {
-                Function(ft1,ft2)   => {
-                    if *ft1 == arg_type {
-                        // types of args match param types
-                        // produce resultant type
-                        tc_pass(
-                            *ft2,
-                            env
-                        )
-
-                    } else {
-                        // mismatch
-                        tc_fail(format!("Function '{f}' of type '{t1c}' applied to args of type '{arg_type}'. Consider changing the args to match the function type, or change the type of the function to fix this."))
+            let (args_types,_) = args.into_iter().fold(
+                Ok((Vec::new(), env.clone())),
+                |acc: Result<(Vec<ParsedType>, TCEnv), TCError>, elt| {
+                    // Looks like `bind` huh?
+                    if let Ok((mut vec, env)) = acc {
+                        let (typ, env) = tc_expr(elt, env)?;
+                        vec.push(typ);
+                        Ok((vec, env))
                     }
+                    else {
+                        acc
+                    }
+                  }
+            )?;
 
-                },
-                _  => {
-                    // auto fail, no parameters for the type of this function!
-                    tc_fail(format!("Function '{f}' of type '{t1}' is applied to arguments, but has no parameters in its type. Remove the arguments to fix this problem, or change the type of the function to accept arguments."))
-
-                }
+            let parms = if let NamedTuple(p) = *parms {
+                p
             }
+            else {
+                return tc_fail(format!("Variable {} is not a function!", f));
+            };
+
+            parms.into_iter()
+                 .map(|(_, t)| *t)
+                 .zip_longest(args_types)
+                 .fold(
+                      Ok((*retval, env)),
+                      |acc, zipval| {
+                          if let Ok(pair) = acc {
+                              match zipval {
+                                  Both(l, r) => if l != r { tc_fail(format!("Incorrect type passed to function '{}'", f))} else {Ok(pair)},
+                                  _ => tc_fail(format!("Incorrect number of arguments given to function '{}'", f)),
+                              }
+                          }
+                          else {
+                              acc
+                          }
+                      }
+            )
         }
 
         /*
@@ -605,10 +614,10 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
                 Function(f1,f2) => {
                     if *f1 == t2c {
                        // match
-                        return tc_pass(
+                        tc_pass(
                             *f2,
                             env1
-                        );
+                        )
 
                     } else {
                         // mismatch
@@ -640,15 +649,15 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
             } else {
                 // verify the types of b1 & b2 match
-                let (tb1,env2) = tc_body(b1,env1)?;
-                let (tb2,env3) = tc_body(b2,env2)?;
+                let (tb1,env2) = tc_body(b1, &env1)?;
+                let (tb2,env3) = tc_body(b2, &env2)?;
 
                 if tb1 == tb2 {
                     // body types match
-                    return tc_pass(
+                    tc_pass(
                         tb1,
                         env3
-                    );
+                    )
 
                 } else {
                     // body types do NOT match, fail
@@ -731,9 +740,9 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
         // fill in the rest here, and just call out the relevant handler
         _ => tc_fail(format!("Unrecognized expression '{:?}'", e))
-    };
-    return res;
+    }
 }
+
 
 /*
 
