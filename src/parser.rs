@@ -631,6 +631,12 @@ fn mdef(name: &str, typ: ParsedType, val: Expr) -> Expr {
     }
 }
 
+//
+//
+// PARSER TESTS
+//
+//
+
 /// Tests parsing an immutable def
 #[test]
 fn test_parse_def() {

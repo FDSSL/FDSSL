@@ -1,6 +1,6 @@
 /*
 
-Alright, plan of action, I wrote out a bunch of 'typing'
+TODO @montymxb: Alright, plan of action, I wrote out a bunch of 'typing'
 rules for FDSSL on the train. I can find them and sketch them out here,
 check if they make sense still.
 
@@ -58,8 +58,6 @@ use syntax::ParsedType::NamedTuple;
 use syntax::ParsedType::Function;
 use syntax::ParsedType::BaseType;
 use syntax::AccessType::Name;
-
-use itertools::EitherOrBoth::Both;
 use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
 
@@ -162,13 +160,14 @@ fn mk_bin_func(t: ParsedType) -> ParsedType {
     mk_func_typ(Tuple(vec![t.clone(),t.clone()]), t)
 }
 
-fn op_num_type(bop: & syntax::BOp) -> bool {
+/// Returns whether a binary operator produces a numeric value
+fn op_num_type(bop: &syntax::BOp) -> bool {
     match bop {
         syntax::BOp::Mod => true,
-        syntax::BOp::Gt => true,
+        syntax::BOp::Gt  => true,
         syntax::BOp::Gte => true,
         syntax::BOp::Lte => true,
-        syntax::BOp::Lt => true,
+        syntax::BOp::Lt  => true,
         syntax::BOp::Add => true,
         syntax::BOp::Sub => true,
         syntax::BOp::Mul => true,
@@ -494,65 +493,73 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
         */
         // Function application
         Expr::App{fname: f, arguments: args} => {
-            // get func type for app
-            //
-            let res = tc_lookup(&f, &env)?;
-            let (parms, retval) = if let Function(p,r) = res {
-                (p,r)
+            // verify that this name exists
+            let res = tc_lookup(&f, &env);
+            if res.is_err() {
+                return tc_fail(format!("Function {} does not exist", f));
+            }
+
+            // verify that our function is actually a function
+            // and if so, extract the arg & return types
+            let maybeFunc = tc_lookup(&f, &env)?;
+            let (argType, retType) = if let Function(a,r) = maybeFunc {
+                (a,r)
             }
             else {
                 return tc_fail(format!("Variable {} is not a function!", f));
             };
 
+            // verify that we have the correct # of args
+            if type_arity(*argType.clone()) != args.len() {
+                return tc_fail(format!("Incorrect number of arguments passed to f {}", f));
+            }
+            let l2 = args.len();
 
+            // compute argument types
+            // TODO @montymxb argument evaluation should update the environment instead of just cloning it
+            let mut mutEnv = env.clone();
+            let maybeArgTypesComputed: Vec<Result<(ParsedType, HashMap<String, ParsedType>), String>> = args.into_iter().map(|e| tc_expr(e, mutEnv.clone())).collect();
 
-            // let (parms, retval) = match res {
-            //     Function(p,r) => (p,r),
-            //     _ => tc_fail(format!("Variable {} is not a function!", f))
-            // };
+            let maybeArgTypesComputedLen = maybeArgTypesComputed.as_slice().len();
 
-            // typecheck each arg, and produce a list of arg types
-            //let args_types = args.into_iter().map(|a| tc_expr());
+            // check that the lengths match up
+            if maybeArgTypesComputedLen != l2 {
+                return tc_fail(format!("Incorrect number of arguments supplied to function {}", f));
+            }
 
-            let (args_types,_) = args.into_iter().fold(
-                Ok((Vec::new(), env.clone())),
-                |acc: Result<(Vec<ParsedType>, TCEnv), TCError>, elt| {
-                    // Looks like `bind` huh?
-                    if let Ok((mut vec, env)) = acc {
-                        let (typ, env) = tc_expr(elt, env)?;
-                        vec.push(typ);
-                        Ok((vec, env))
-                    }
-                    else {
-                        acc
-                    }
-                  }
-            )?;
+            // verify that all of these are success (on any failures, we should just exit out)
+            for argResult in maybeArgTypesComputed.as_slice() {
+                if argResult.is_err() {
+                    return tc_fail(format!("Failed to typecheck argument of function {}", f));
+                }
+            }
 
-            let parms = if let NamedTuple(p) = *parms {
-                p
+            // before checking look to lift the supplied args into a tuple
+            // this will let us easily check the two types in a single go
+            let argTypesComputed = maybeArgTypesComputed.into_iter().filter(|atc| atc.is_ok()).map(|atc| {
+                let (p,_) = atc.unwrap();
+                return p;
+            }).collect_vec();
+            let mut argPTComputed : ParsedType;
+            if maybeArgTypesComputedLen > 1 {
+                // unpack & wrap in a tuple
+                argPTComputed = Tuple(argTypesComputed);
+            } else {
+                // just the single value
+                argPTComputed = argTypesComputed[0].clone();
+
+            }
+            
+            // type check the args
+            if argPTComputed == *argType {
+                // valid, return the function's return type
+                return tc_pass(*retType, env);
             }
             else {
-                return tc_fail(format!("Variable {} is not a function!", f));
-            };
-
-            parms.into_iter()
-                 .map(|(_, t)| *t)
-                 .zip_longest(args_types)
-                 .fold(
-                      Ok((*retval, env)),
-                      |acc, zipval| {
-                          if let Ok(pair) = acc {
-                              match zipval {
-                                  Both(l, r) => if l != r { tc_fail(format!("Incorrect type passed to function '{}'", f))} else {Ok(pair)},
-                                  _ => tc_fail(format!("Incorrect number of arguments given to function '{}'", f)),
-                              }
-                          }
-                          else {
-                              acc
-                          }
-                      }
-            )
+                // fail, type mismatch!
+                // TODO, improve message
+                return tc_fail("Function typecheck failed".to_string());
+            }
         }
 
         /*
@@ -755,3 +762,145 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 .... current implementation is not capable of being type checked, does not guarantee a value ....
 .... should we consider a 'do while', given we can just guarantee a value then?
  */
+
+
+//
+//
+// TYPECHECKER TESTS
+//
+//
+
+
+/// Tests typechecker env lookup behavior
+#[test]
+fn test_tc_lookup() {
+    let mut tcEnv: TCEnv = HashMap::new();
+    let bt: ParsedType = typ("SomeString");
+    tcEnv.insert("key".to_string(), bt.clone());
+
+    // try a good lookup
+    let r1 = tc_lookup("key", &tcEnv);
+    assert_eq!(
+        r1,
+        Ok(bt),
+        "Failed to lookup name in env during TC"
+    );
+
+    // try a bad lookup
+    let r2 = tc_lookup("badKey", &tcEnv);
+    assert_eq!(
+        r2,
+        Err(
+            "Non-existant binding 'badKey' referenced, perhaps you meant to declare it first with 'let' or 'mut'?".to_string()
+        ),
+        "Failed to reject bad lookup"
+    )
+}
+
+#[test]
+fn test_tc_body() {
+    let tcEnv: TCEnv = HashMap::new();
+
+    // typecheck an empty body, should fail
+    let body: Vec<Expr> = vec![];
+    let r1: TCResult = tc_body(body, &tcEnv);
+    assert_eq!(
+        r1,
+        Err("Unable to typecheck an empty body!".to_string()),
+        "Should have rejected an empty program body"
+    );
+}
+
+#[test]
+fn test_type_arity() {
+    // base type
+    let a1: usize = type_arity(BaseType("".to_string()));
+    // tuple
+    let a2: usize = type_arity(Tuple(vec![
+        typ("a"),
+        typ("b"),
+        typ("c")
+    ]));
+    // named tuple
+    let a3: usize = type_arity(NamedTuple(vec![
+        ("".to_string(), Box::new(typ("e")))
+    ]));
+    // function type
+    let a4: usize = type_arity(Function(
+        Box::new(typ("a")),
+        Box::new(typ("b"))
+    ));
+
+    assert_eq!(a1, 1, "Arity was wrong for a BaseType");
+    assert_eq!(a2, 3, "Arity was wrong for a Tuple");
+    assert_eq!(a3, 1, "Arity was wrong for a NamedTuple");
+    assert_eq!(a4, 1, "Arity was wrong for a Function");
+}
+
+
+#[test]
+fn test_op_num_type() {
+    // verify basic binary ops are correctly classified as numeric (or not)
+    assert_eq!(op_num_type(&BOp::Mod), true, "Failed to identify Mod as numeric");
+    assert_eq!(op_num_type(&BOp::Add), true, "Failed to identify Add as numeric");
+    assert_eq!(op_num_type(&BOp::Sub), true, "Failed to identify Sub as numeric");
+    assert_eq!(op_num_type(&BOp::Mul), true, "Failed to identify Mul as numeric");
+    assert_eq!(op_num_type(&BOp::Div), true, "Failed to identify Div as numeric");
+
+    assert_eq!(op_num_type(&BOp::Gt), true, "Failed to identify Gt as numeric");
+    assert_eq!(op_num_type(&BOp::Gte), true, "Failed to identify Gte as numeric");
+    assert_eq!(op_num_type(&BOp::Lt), true, "Failed to identify Lt as numeric");
+    assert_eq!(op_num_type(&BOp::Lte), true, "Failed to identify Lte as numeric");
+
+    // some non numerics
+    assert_eq!(op_num_type(&BOp::Or), false, "Failed to identify Or as non-numeric");
+    assert_eq!(op_num_type(&BOp::And), false, "Failed to identify And as non-numeric");
+    assert_eq!(op_num_type(&BOp::Eq), false, "Failed to identify Eq as non-numeric");
+    assert_eq!(op_num_type(&BOp::Neq), false, "Failed to identify Neq as non-numeric");
+}
+
+/// Pulled from std (lib), seems we don't have this in our version?
+/// https://docs.rs/assert_ok/latest/src/assert_ok/lib.rs.html#1-23 (should be in latest version right?)
+/// Assert that a [`Result`] is [`Ok`]
+///
+/// If the provided expresion evaulates to [`Ok`], then the
+/// macro returns the value contained within the [`Ok`]. If
+/// the [`Result`] is an [`Err`] then the macro will [`panic`]
+/// with a message that includes the expression and the error.
+#[macro_export]
+macro_rules! assert_ok {
+    ( $x:expr ) => {
+        match $x {
+            std::result::Result::Ok(v) => v,
+            std::result::Result::Err(e) => {
+                panic!("Error calling {}: {:?}", stringify!($x), e);
+            }
+        }
+    };
+}
+
+/// Typecheck various expressions
+#[test]
+fn test_tc_expr() {
+    let mut tcEnv: TCEnv = HashMap::new();
+    tcEnv.insert("ref".to_string(), typ("int"));
+    tcEnv.insert("add".to_string(), mk_bin_func(typ("int")));
+
+    assert_eq!(tc_expr(Expr::I(32), tcEnv.clone()), Ok((typ("int"), tcEnv.clone())));
+    assert_eq!(tc_expr(Expr::F(32.32), tcEnv.clone()), Ok((typ("float"), tcEnv.clone())));
+    assert_eq!(tc_expr(Expr::D(32.32), tcEnv.clone()), Ok((typ("double"), tcEnv.clone())));
+    assert_eq!(tc_expr(Expr::B(true), tcEnv.clone()), Ok((typ("bool"), tcEnv.clone())));
+    assert_eq!(tc_expr(Expr::Ref("ref".to_string()), tcEnv.clone()), Ok((typ("int"), tcEnv.clone())));
+    
+    // verify func app
+    let app: Expr = Expr::App { fname: "add".to_string(), arguments: vec![
+        Expr::I(3),
+        Expr::I(7)
+    ]};
+    assert_eq!(tc_expr(app, tcEnv.clone()), Ok((typ("int"), tcEnv.clone())));
+
+    // TODO @montymxb add test for do/while (instead of for), we can desugar that as needed I think
+    // TODO @montymxb test for Abstraction would be good
+    // TODO @montymxb test for branch would be good here too
+
+}
