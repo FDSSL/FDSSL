@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Debug,PartialEq)]
 pub enum Type {
     Uint,
@@ -16,11 +18,43 @@ pub enum Type {
 /// This enum is not meant to be used outside the parser and type checker
 /// as it simply denotes the structure of the type rather than any type
 /// space the type occupies.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ParsedType {
     BaseType(String),
-    Tuple(Vec<Box<ParsedType>>),
+    Tuple(Vec<ParsedType>),
+    NamedTuple(Vec<(String, Box<ParsedType>)>), // stores indexed types for named tuples
     Function(Box<ParsedType>, Box<ParsedType>),
+}
+
+/// User friendly dipslyaing of parsed types in TypeChecker errors
+impl fmt::Display for ParsedType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &*self {
+            ParsedType::BaseType(s)     => write!(f, "{}", s),
+            ParsedType::Tuple(v)        => {
+                write!(f, "(");
+                for (i,t) in v.into_iter().enumerate() {
+                    write!(f, "{}", t);
+                    if i < (v.len()-1) {
+                        write!(f, ", ");
+                    }
+                }
+                write!(f, ")")
+            },
+            ParsedType::Function(t1,t2) => write!(f, "{} -> {}", format!("{}",t1), format!("{}",t2)),
+            ParsedType::NamedTuple(v)   => {
+                write!(f, "(");
+                for (i,t) in v.into_iter().enumerate() {
+                    write!(f, "{}:{}", t.0, *t.1);
+                    if i < (v.len()-1) {
+                        write!(f, ", ");
+                    }
+                }
+                write!(f, ")")
+                // write!(f, "({})", format!("{:?}",v))
+            }
+        }
+    }
 }
 
 #[derive(Debug,PartialEq,Clone,Copy)]
@@ -44,10 +78,44 @@ pub enum BOp {
     BitXor,
 }
 
+impl fmt::Display for BOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            BOp::Add => "+",
+            BOp::Sub => "-",
+            BOp::Mul => "*",
+            BOp::Div => "/",
+            BOp::Mod => "%",
+            BOp::And => "&&",
+            BOp::Or => "||",
+            BOp::Compose => ".",
+            BOp::Eq => "==",
+            BOp::Neq => "!=",
+            BOp::Gt => ">",
+            BOp::Gte => ">=",
+            BOp::Lt => "<",
+            BOp::Lte => "<=",
+            BOp::BitAnd => "&",
+            BOp::BitOr => "|",
+            BOp::BitXor => "^",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[derive(Debug,PartialEq,Clone,Copy)]
 pub enum UOp {
     Negative,
     Negate
+}
+
+impl fmt::Display for UOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            UOp::Negative   => write!(f, "-"),
+            UOp::Negate     => write!(f, "!")
+        }
+    }
 }
 
 #[derive(Debug,PartialEq)]
@@ -117,9 +185,12 @@ pub enum Expr {
     },
     Access(String, AccessType),
     Comment(Vec<String>),
-    // parameterized abstraction
+    // parameterized abstraction, where each param has an explicit type
     Abs {
-        params: Vec<String>,
+        params: Vec<(String,ParsedType)>,
         body: Vec<Expr>
     }
 }
+
+// program is a vector of expressions
+pub type Program = Vec<Expr>;

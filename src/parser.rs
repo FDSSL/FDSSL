@@ -6,14 +6,13 @@ use syntax::AccessType;
 use syntax::BOp;
 use syntax::UOp;
 extern crate itertools;
-use itertools::Itertools;
 
 extern crate nom;
 
 use nom::bytes::complete::{tag};
 use nom::character::complete::{char, alpha1, alphanumeric1, i32, multispace0, space0, space1, line_ending, not_line_ending, digit1};
 use nom::{IResult};
-use nom::character::is_alphabetic;
+//use nom::character::is_alphabetic;
 use nom::branch::alt;
 use nom::multi::{many0, many1, separated_list0, separated_list1};
 use nom::sequence::{preceded, delimited, terminated, separated_pair, tuple, pair};
@@ -174,9 +173,7 @@ fn parse_type_tuple(i: &str) -> IResult<&str, ParsedType> {
         );
     map(
         parser,
-        |elts: Vec<ParsedType>| ParsedType::Tuple(
-            elts.into_iter().map(|e| Box::new(e)).collect()
-        )
+        |elts: Vec<ParsedType>| ParsedType::Tuple(elts)
     )(i)
 }
 
@@ -280,7 +277,7 @@ fn parse_branch(input: &str) -> IResult<&str, Expr> {
     let (input,b1)      = parse_scoped_exprs(input)?;
     let (input,_)       = preceded(space0, tag("else"))(input)?;
     let (input,b2)      = parse_scoped_exprs(input)?;
-    return Ok((input, Expr::Branch{condition: Box::new(cond), b1: b1, b2: b2}))
+    Ok((input, Expr::Branch{condition: Box::new(cond), b1: b1, b2: b2}))
 }
 
 /// Parses a parameterized abstraction
@@ -288,13 +285,14 @@ fn parse_branch(input: &str) -> IResult<&str, Expr> {
 /// The parameters themselves lack a type here, as they are bound by the context they are assigned within
 fn parse_abs(input: &str) -> IResult<&str, Expr> {
     // parse delimited args
-    let (input,params)  = delimited(
+    let (input,typed_params)  = delimited(
         preceded(space0, char('(')),
-        separated_list0(preceded(space0, tag(",")), name_str),
+        // ugly, but works as name : Type
+        separated_list0(preceded(space0, tag(",")), separated_pair(preceded(space0, name_str), preceded(space0, tag(":")), parse_type)),
         preceded(space0, char(')'))
     )(input)?;
     let (input,exprs)   = parse_scoped_exprs(input)?;
-    Ok((input, Expr::Abs{params: params, body: exprs}))
+    Ok((input, Expr::Abs{params: typed_params, body: exprs}))
 }
 
 fn parse_unary_expr(input: &str) -> IResult<&str, Expr> {
@@ -344,7 +342,9 @@ fn parse_named_vect(input: &str) -> IResult<&str, Expr> {
         separated_list1(preceded(space0, tag(",")), separated_pair(preceded(space0, name_str), preceded(space0, tag(":")), parse_expr)),
         preceded(space0, char(')'))
     );
-    map(p, |s: Vec<(String,Expr)>| Expr::NamedVect(s))(input)
+    // accept a named vect that is NOT terminated by an opening curly brace
+    // If so, it was a failed abstraction that we should continue to reject
+    map(terminated(p,not(tuple((multispace0,char('{'))))), |s: Vec<(String,Expr)>| Expr::NamedVect(s))(input)
 }
 
 
@@ -384,12 +384,12 @@ fn parse_expr(input: &str) -> IResult<&str, Expr> {
         parse_unary_expr,
         parse_bool,
         parse_comment,
-        parse_named_vect,
 
         // Abs vs. Nested Exprs are position sensitive
         // Nested Exprs must be checked after Abs, or abstractions will
         // be mangled before they can be checked
         parse_abs,
+        parse_named_vect,
         parse_nested_expr,
         parse_vect,
 
@@ -437,17 +437,11 @@ pub fn program(i: &str) -> IResult<&str, Vec<Expr>> {
     //     tuple((space0, line_ending))
     // ))))(i)
 
-
-    /*
-    1st try to parse many exprs followed by
-    2nd try to parse to a line break
-    3rd try to
-    */
-
     terminated(
-        many1(terminated(parse_expr, tuple((space0, line_ending)))),
+        // parse 1 or more expressions, terminated by 1 or more lines...
+        many1(terminated(parse_expr, many1(tuple((space0, line_ending))))),
+        // followed by any number of empty lines afterwards, if any
         tuple((multispace0, eof))
-        //many0(tuple((space0, line_ending)))
     )(i)
 }
 
@@ -637,6 +631,12 @@ fn mdef(name: &str, typ: ParsedType, val: Expr) -> Expr {
     }
 }
 
+//
+//
+// PARSER TESTS
+//
+//
+
 /// Tests parsing an immutable def
 #[test]
 fn test_parse_def() {
@@ -668,14 +668,14 @@ fn test_parse_type_function() {
     assert_eq!(
         parse_type("(int,bool) -> (A, B -> (C,D -> F))"),
         Ok(("", ParsedType::Function(
-            Box::new(ParsedType::Tuple(vec![Box::new(ptype("int")), Box::new(ptype("bool"))])),
-            Box::new(ParsedType::Tuple(vec![Box::new(ptype("A")), Box::new(ParsedType::Function(
+            Box::new(ParsedType::Tuple(vec![ptype("int"), ptype("bool")])),
+            Box::new(ParsedType::Tuple(vec![ptype("A"), ParsedType::Function(
                 Box::new(ptype("B")),
-                Box::new(ParsedType::Tuple(vec![Box::new(ptype("C")), Box::new(ParsedType::Function(
+                Box::new(ParsedType::Tuple(vec![ptype("C"), ParsedType::Function(
                     Box::new(ptype("D")),
-                    Box::new(ptype("F"))))]
+                    Box::new(ptype("F")))]
                 ))
-            ))]))
+            )]))
         ))),
         "Failed to parse basic type"
     );
@@ -688,8 +688,8 @@ fn test_parse_type_tuple() {
                Ok(("",
                    ParsedType::Tuple(
                        vec![
-                           Box::new(ptype("int")),
-                           Box::new(ptype("int")),
+                           ptype("int"),
+                           ptype("int"),
                        ]
                     )
 
@@ -700,9 +700,9 @@ fn test_parse_type_tuple() {
                Ok(("",
                    ParsedType::Tuple(
                        vec![
-                           Box::new(ParsedType::BaseType("int".to_string())),
-                           Box::new(ParsedType::BaseType("int".to_string())),
-                           Box::new(ParsedType::BaseType("bool".to_string())),
+                           ParsedType::BaseType("int".to_string()),
+                           ParsedType::BaseType("int".to_string()),
+                           ParsedType::BaseType("bool".to_string()),
                        ]
                     )
 
@@ -787,21 +787,28 @@ fn test_parse_branch() {
     assert_eq!(parse_expr("if oops(1,2) { 5 } else { 55").is_ok(), false, "Failed to discard badly formatted branch");
 }
 
+/// Testing of parsing of scope exprs
+#[test]
+fn test_parse_scoped_exprs() {
+    // parse_scoped_exprs
+    assert_eq!(parse_scoped_exprs(" x y ").is_ok(), false, "Failed to reject scoped expr that was not correct");
+}
+
 /// Tests parametrized abstractions
 #[test]
 fn test_parse_abs() {
-    let mut a = Expr::Abs{params: vec![], body: vec![i(5)]};
+    let a = Expr::Abs{params: vec![], body: vec![i(5)]};
     assert_eq!(parse_expr("() { 5 }") , Ok(("", a)), "Failed to parse a simple abstraction");
 
-    let mut a = Expr::Abs{params: vec!["x".to_string(), "y".to_string()], body: vec![Expr::Ref("x".to_string()),Expr::Ref("y".to_string())]};
-    assert_eq!(parse_expr("(x,y) { x \n y\n }") , Ok(("", a)), "Failed to parse a more complex abstraction");
+    let a = Expr::Abs{params: vec![("x".to_string(), ParsedType::BaseType("T1".to_string())), ("y".to_string(), ParsedType::BaseType("bool".to_string()))], body: vec![Expr::Ref("x".to_string()),Expr::Ref("y".to_string())]};
+    assert_eq!(parse_expr("(x : T1, y : bool) { x \n y\n }") , Ok(("", a)), "Failed to parse a more complex abstraction #1");
 
     // test w/ no break between exprs (invalid)
-    assert_eq!(parse_expr("(x,y) { x y }").is_ok(), false, "Failed to reject poorly formatted abstraction body");
+    assert_eq!(parse_expr("(x : T1, y : T2) { x y }").is_ok(), false, "Failed to reject poorly formatted abstraction body");
 
     // test an abstraction w/ many linebreaks between exprs, and elsewhere too
-    let mut a = Expr::Abs{params: vec!["x".to_string(), "y".to_string()], body: vec![Expr::Ref("x".to_string()),Expr::Ref("y".to_string())]};
-    assert_eq!(parse_expr("(x,y) \n { \n x \n\n\n y }") , Ok(("", a)), "Failed to parse a more complex abstraction");
+    let a = Expr::Abs{params: vec![("x".to_string(), ParsedType::BaseType("T1".to_string())), ("y".to_string(), ParsedType::BaseType("T2".to_string()))], body: vec![Expr::Ref("x".to_string()),Expr::Ref("y".to_string())]};
+    assert_eq!(parse_expr("(x : T1, y : T2) \n { \n x \n\n\n y }") , Ok(("", a)), "Failed to parse a more complex abstraction #2");
 }
 
 /// Tests parsing for loops
@@ -871,14 +878,14 @@ fn test_parse_func() {
     );
 
     assert_eq!(
-        parse_expr("let id : int -> int = (x) { x }"),
+        parse_expr("let id : int -> int = (x : int) { x }"),
         Ok((
             "",
             Expr::Def{
                 name:   "id".to_string(),
                 typ:    ParsedType::Function(Box::new(ptype("int")), Box::new(ptype("int"))),
                 value:  Box::new(Expr::Abs{
-                    params: vec!["x".to_string()],
+                    params: vec![("x".to_string(), ParsedType::BaseType("int".to_string()))],
                     body:   vec![Expr::Ref("x".to_string())]
                 })
             }
@@ -888,7 +895,7 @@ fn test_parse_func() {
 
     // add test
     assert_eq!(
-        parse_expr("let add : (int,int) -> int = (_x,y) {\n_x + y\n}"),
+        parse_expr("let add : (int,int) -> int = (_x : int, y : int) {\n_x + y\n}"),
         Ok((
             "",
             Expr::Def{
@@ -896,12 +903,12 @@ fn test_parse_func() {
                 // (int,int) -> int
                 typ:    ParsedType::Function(
                     Box::new(ParsedType::Tuple(
-                        vec![Box::new(ptype("int")),
-                        Box::new(ptype("int"))])),
+                        vec![ptype("int"),
+                            ptype("int")])),
                     Box::new(ptype("int"))),
                 // _x + y
                 value:  Box::new(Expr::Abs{
-                    params: vec!["_x".to_string(), "y".to_string()],
+                    params: vec![("_x".to_string(), ParsedType::BaseType("int".to_string())), ("y".to_string(), ParsedType::BaseType("int".to_string()))],
                     body:   vec![Expr::BinOp{
                         operator: BOp::Add,
                         e1:       Box::new(Expr::Ref("_x".to_string())),
@@ -912,4 +919,26 @@ fn test_parse_func() {
         )),
         "Failed to parse inc function"
     )
+}
+
+
+/// Tests multiple functions declared one after the other, w/ an app at the end
+#[test]
+fn test_parse_small_prog() {
+    let prog = "\
+    let swap : (int, int) -> (int, int) = (x : int, y : int) { \n\
+    \t(y,x)\n\
+    }\n\
+    \
+    let apply : (int -> int, int) -> int = (f: int -> int, v: int) {\n\
+    \tf(v)\n\
+    }\n\
+    \n\
+    let add: (int,int) -> int = (x: int, y: int) {\n\
+    \tx+y\n\
+    }\n\
+    \n\
+    apply(add,2)\n\
+    ";
+    assert_eq!(program(prog).is_ok(), true)
 }
