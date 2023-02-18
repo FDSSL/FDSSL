@@ -104,7 +104,7 @@ fn tc_lookup(n: &str, env: &TCEnv) -> Result<ParsedType,TCError> {
 }
 
 /// Attempts to typecheck a program
-pub fn tc_program(p: Program) -> TCResult {
+pub fn tc_program(p: &Program) -> TCResult {
     let env : TCEnv = HashMap::new();
     tc_body(p, &env)
 }
@@ -112,7 +112,7 @@ pub fn tc_program(p: Program) -> TCResult {
 /// Typechecks a vector of Exprs w/ a given environment
 /// Verifies all of them before returning the result of the last Expr
 /// Expects a body of 1 or more Exprs to verify
-fn tc_body(body: Vec<Expr>, env: &TCEnv) -> TCResult {
+fn tc_body(body: &Vec<Expr>, env: &TCEnv) -> TCResult {
     if body.is_empty() {
         // must have something to work with
         tc_fail("Unable to typecheck an empty body!".to_string())
@@ -246,11 +246,11 @@ fn uop_type(uop: UOp, arg: ParsedType) -> Result<ParsedType, TCError> {
     match arg {
         BaseType(n) => {
             match (uop, n.as_str()) {
-                (Negative, "int")      => Ok(mk_func_typ(arg1, arg2)),
-                (Negative, "float")    => Ok(mk_func_typ(arg1, arg2)),
-                (Negative, "double")   => Ok(mk_func_typ(arg1, arg2)),
+                (UOp::Negative, "int")      => Ok(mk_func_typ(arg1, arg2)),
+                (UOp::Negative, "float")    => Ok(mk_func_typ(arg1, arg2)),
+                (UOp::Negative, "double")   => Ok(mk_func_typ(arg1, arg2)),
         
-                (Negate, "bool")   => Ok(mk_func_typ(arg1, arg2)),
+                (UOp::Negate, "bool")   => Ok(mk_func_typ(arg1, arg2)),
 
                 _ => Err(format!("Invalid marghing of unary op {uop} with an argument type {n}"))
             }
@@ -284,7 +284,7 @@ THEN
 */
 
 // Typecheck general expressions
-fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
+fn tc_expr(e: &Expr, mut env: TCEnv) -> TCResult {
     match e {
 
         // Int
@@ -321,7 +321,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
         // Ref tc
         Expr::Ref(r) => {
-            match env.get(&r) {
+            match env.get(r) {
                 Some(t) => tc_pass(t.clone(), env),
                 None    => tc_fail(format!("Undefined reference '{r}'!"))
             }
@@ -341,17 +341,17 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
             Gamma entails 'let n : T = e' has type 'T'
         */
         Expr::Def{name: n, typ: t, value: e} => {
-            let (t1, mut env1) = tc_expr(*e, env)?;
+            let (t1, mut env1) = tc_expr(e, env)?;
 
-            if t != t1 {
+            if *t != t1 {
                 // fail if the types don't match
                 tc_fail(format!("Definition of '{n}' has type '{t}', but was assigned to a value of type '{t1}'"))
 
             } else {
                 // valid, add this name & type combo to our env & continue
-                env1.insert(n,t.clone());
+                env1.insert(n.clone(),t.clone());
                 tc_pass(
-                    t,
+                    t.clone(),
                     env1
                 )
             }
@@ -375,16 +375,16 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
         // TODO, to distinguish this during updates,
         //     we may need a 'mut' or 'let' modifier for bindings ?, or we'll handle this elsewhere...I'll come back to this
         Expr::DefMut{name: n, typ: t, value: e} => {
-            let (t1,mut env1) = tc_expr(*e, env)?;
+            let (t1,mut env1) = tc_expr(e, env)?;
 
-            if t != t1 {
+            if *t != t1 {
                 // fail if the types don't match
                 tc_fail(format!("Definition of '{n}' has type '{t}', but was assigned to a value of type '{t1}'"))
 
             } else {
                 // valid, add this name & type combo to our env & continue
-                env1.insert(n,t.clone());
-                tc_pass(t, env1)
+                env1.insert(n.clone(),t.clone());
+                tc_pass(t.clone(), env1)
             }
         },
 
@@ -403,7 +403,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
         */
         Expr::Update{target: n, value: v} => {
             let t1 = tc_lookup(&n, &env)?;
-            let (t2,env) = tc_expr(*v, env)?;
+            let (t2,env) = tc_expr(v, env)?;
             if t1 == t2 {
                 tc_pass(t1,env)
             } else {
@@ -446,7 +446,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
             ).collect();
 
             // get type of the body (return type), ignoring effect on env
-            let (tb,_) = tc_body(b, &env)?;
+            let (tb,_) = tc_body(&b, &env)?;
 
             // reset the env back
             // Do not believe clippy. The iterator is collected above to insert the parameters into env.
@@ -454,7 +454,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
                 env.insert(n.clone(), t);
             });
 
-            let p : Vec<ParsedType> = p.into_iter().map(|(_,t)| t).collect();
+            let p : Vec<ParsedType> = p.into_iter().map(|(_,t)| t.clone()).collect();
 
             match p.len() {
                 0 => {
@@ -501,8 +501,8 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
             // verify that our function is actually a function
             // and if so, extract the arg & return types
-            let maybeFunc = tc_lookup(&f, &env)?;
-            let (argType, retType) = if let Function(a,r) = maybeFunc {
+            let maybe_func = tc_lookup(&f, &env)?;
+            let (arg_type, ret_type) = if let Function(a,r) = maybe_func {
                 (a,r)
             }
             else {
@@ -510,50 +510,50 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
             };
 
             // verify that we have the correct # of args
-            if type_arity(*argType.clone()) != args.len() {
+            if type_arity(*arg_type.clone()) != args.len() {
                 return tc_fail(format!("Incorrect number of arguments passed to f {}", f));
             }
             let l2 = args.len();
 
             // compute argument types
             // TODO @montymxb argument evaluation should update the environment instead of just cloning it
-            let mut mutEnv = env.clone();
-            let maybeArgTypesComputed: Vec<Result<(ParsedType, HashMap<String, ParsedType>), String>> = args.into_iter().map(|e| tc_expr(e, mutEnv.clone())).collect();
+            let mut_env = env.clone();
+            let maybe_arg_types_computed: Vec<Result<(ParsedType, HashMap<String, ParsedType>), String>> = args.into_iter().map(|e| tc_expr(e, mut_env.clone())).collect();
 
-            let maybeArgTypesComputedLen = maybeArgTypesComputed.as_slice().len();
+            let maybe_arg_types_comp_len = maybe_arg_types_computed.as_slice().len();
 
             // check that the lengths match up
-            if maybeArgTypesComputedLen != l2 {
+            if maybe_arg_types_comp_len != l2 {
                 return tc_fail(format!("Incorrect number of arguments supplied to function {}", f));
             }
 
             // verify that all of these are success (on any failures, we should just exit out)
-            for argResult in maybeArgTypesComputed.as_slice() {
-                if argResult.is_err() {
+            for arg_result in maybe_arg_types_computed.as_slice() {
+                if arg_result.is_err() {
                     return tc_fail(format!("Failed to typecheck argument of function {}", f));
                 }
             }
 
             // before checking look to lift the supplied args into a tuple
             // this will let us easily check the two types in a single go
-            let argTypesComputed = maybeArgTypesComputed.into_iter().filter(|atc| atc.is_ok()).map(|atc| {
+            let arg_types_computed = maybe_arg_types_computed.into_iter().filter(|atc| atc.is_ok()).map(|atc| {
                 let (p,_) = atc.unwrap();
                 return p;
             }).collect_vec();
-            let mut argPTComputed : ParsedType;
-            if maybeArgTypesComputedLen > 1 {
+            let arg_pt_computed : ParsedType;
+            if maybe_arg_types_comp_len > 1 {
                 // unpack & wrap in a tuple
-                argPTComputed = Tuple(argTypesComputed);
+                arg_pt_computed = Tuple(arg_types_computed);
             } else {
                 // just the single value
-                argPTComputed = argTypesComputed[0].clone();
+                arg_pt_computed = arg_types_computed[0].clone();
 
             }
             
             // type check the args
-            if argPTComputed == *argType {
+            if arg_pt_computed == *arg_type {
                 // valid, return the function's return type
-                return tc_pass(*retType, env);
+                return tc_pass(*ret_type, env);
             }
             else {
                 // fail, type mismatch!
@@ -579,10 +579,10 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
         // BinOp
         Expr::BinOp{operator: b, e1: e11, e2: e22} => {
             // can use '?' here to help unwrap conditional value, using maybe or Either?
-            let (t1,e1) = tc_expr(*e11, env)?;
-            let (t2,e2) = tc_expr(*e22, e1)?;
+            let (t1,e1) = tc_expr(e11, env)?;
+            let (t2,e2) = tc_expr(e22, e1)?;
             // get param type & result type for this BinOp
-            let btyp = bop_type(b, &t1, &t2)?;
+            let btyp = bop_type(*b, &t1, &t2)?;
 
             match btyp {
                 Function(tp, tr)    => {
@@ -610,14 +610,14 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
         WLOG, same as TC(App) above, but w/ no parens
         */
-        Expr::UnaryOp{operator: b, e: e} => {
+        Expr::UnaryOp{operator: b, e} => {
             // TODO setup to get type of uop and match w/ expr type
-            let (t2,env1) = tc_expr(*e, env)?;
+            let (t2,env1) = tc_expr(e, env)?;
             let t2c = t2.clone();
-            let uopTyp = uop_type(b, t2)?;
+            let uop_typ = uop_type(*b, t2)?;
 
 
-            match uopTyp {
+            match uop_typ {
                 Function(f1,f2) => {
                     if *f1 == t2c {
                        // match
@@ -632,7 +632,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
                     }
                 },
-                _ => tc_fail(format!("Unary operator '{b}' was not a function type as expected, was instead '{uopTyp}'"))
+                _ => tc_fail(format!("Unary operator '{b}' was not a function type as expected, was instead '{uop_typ}'"))
             }
         },
 
@@ -649,15 +649,15 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
             Gamma implies `if(c) {e1} else {e2}` has type 'T'
         */
         // BRANCH
-        Expr::Branch{condition: c, b1: b1, b2: b2} => {
-            let (t1,env1) = tc_expr(*c, env)?;
+        Expr::Branch{condition: c, b1, b2} => {
+            let (t1,env1) = tc_expr(c, env)?;
             if t1 != BaseType("bool".to_string()) {
                 return tc_fail(format!("'If' was expecting an expression of type 'bool', but got an expression of type '{t1}' instead"));
 
             } else {
                 // verify the types of b1 & b2 match
-                let (tb1,env2) = tc_body(b1, &env1)?;
-                let (tb2,env3) = tc_body(b2, &env2)?;
+                let (tb1,env2) = tc_body(&b1, &env1)?;
+                let (tb2,env3) = tc_body(&b2, &env2)?;
 
                 if tb1 == tb2 {
                     // body types match
@@ -713,9 +713,9 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
                     // return the property type for this item's name
                     let t = tc_lookup(&n, &env)?;
                     match t {
-                        NamedTuple(namedTypes)  => {
-                            for (name,typ) in namedTypes {
-                                if *name == prop {
+                        NamedTuple(named_types)  => {
+                            for (name,typ) in named_types {
+                                if *name == *prop {
                                     // immediately produce this type w/out any other work
                                     return tc_pass(*typ, env);
                                 }
@@ -803,7 +803,7 @@ fn test_tc_body() {
 
     // typecheck an empty body, should fail
     let body: Vec<Expr> = vec![];
-    let r1: TCResult = tc_body(body, &tcEnv);
+    let r1: TCResult = tc_body(&body, &tcEnv);
     assert_eq!(
         r1,
         Err("Unable to typecheck an empty body!".to_string()),
@@ -886,18 +886,18 @@ fn test_tc_expr() {
     tcEnv.insert("ref".to_string(), typ("int"));
     tcEnv.insert("add".to_string(), mk_bin_func(typ("int")));
 
-    assert_eq!(tc_expr(Expr::I(32), tcEnv.clone()), Ok((typ("int"), tcEnv.clone())));
-    assert_eq!(tc_expr(Expr::F(32.32), tcEnv.clone()), Ok((typ("float"), tcEnv.clone())));
-    assert_eq!(tc_expr(Expr::D(32.32), tcEnv.clone()), Ok((typ("double"), tcEnv.clone())));
-    assert_eq!(tc_expr(Expr::B(true), tcEnv.clone()), Ok((typ("bool"), tcEnv.clone())));
-    assert_eq!(tc_expr(Expr::Ref("ref".to_string()), tcEnv.clone()), Ok((typ("int"), tcEnv.clone())));
+    assert_eq!(tc_expr(&Expr::I(32), tcEnv.clone()), Ok((typ("int"), tcEnv.clone())));
+    assert_eq!(tc_expr(&Expr::F(32.32), tcEnv.clone()), Ok((typ("float"), tcEnv.clone())));
+    assert_eq!(tc_expr(&Expr::D(32.32), tcEnv.clone()), Ok((typ("double"), tcEnv.clone())));
+    assert_eq!(tc_expr(&Expr::B(true), tcEnv.clone()), Ok((typ("bool"), tcEnv.clone())));
+    assert_eq!(tc_expr(&Expr::Ref("ref".to_string()), tcEnv.clone()), Ok((typ("int"), tcEnv.clone())));
     
     // verify func app
     let app: Expr = Expr::App { fname: "add".to_string(), arguments: vec![
         Expr::I(3),
         Expr::I(7)
     ]};
-    assert_eq!(tc_expr(app, tcEnv.clone()), Ok((typ("int"), tcEnv.clone())));
+    assert_eq!(tc_expr(&app, tcEnv.clone()), Ok((typ("int"), tcEnv.clone())));
 
     // TODO @montymxb add test for do/while (instead of for), we can desugar that as needed I think
     // TODO @montymxb test for Abstraction would be good

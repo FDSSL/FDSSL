@@ -32,22 +32,22 @@ impl fmt::Display for ParsedType {
         match &*self {
             ParsedType::BaseType(s)     => write!(f, "{}", s),
             ParsedType::Tuple(v)        => {
-                write!(f, "(");
+                let _r1 = write!(f, "(");
                 for (i,t) in v.into_iter().enumerate() {
-                    write!(f, "{}", t);
+                    let _r2 = write!(f, "{}", t);
                     if i < (v.len()-1) {
-                        write!(f, ", ");
+                        let _r3 = write!(f, ", ");
                     }
                 }
                 write!(f, ")")
             },
             ParsedType::Function(t1,t2) => write!(f, "{} -> {}", format!("{}",t1), format!("{}",t2)),
             ParsedType::NamedTuple(v)   => {
-                write!(f, "(");
+                let _r1 = write!(f, "(");
                 for (i,t) in v.into_iter().enumerate() {
-                    write!(f, "{}:{}", t.0, *t.1);
+                    let _r2 = write!(f, "{}:{}", t.0, *t.1);
                     if i < (v.len()-1) {
-                        write!(f, ", ");
+                        let _r3 = write!(f, ", ");
                     }
                 }
                 write!(f, ")")

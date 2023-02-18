@@ -24,7 +24,7 @@ use nom::combinator::{map, verify, recognize, peek, opt, fail, not, eof};
 macro_rules! bop {
     ( $i:expr , $b:expr) => {
         {
-            map(tag($i), |s: &str| $b)
+            map(tag($i), |_s: &str| $b)
         }
     };
 }
@@ -159,7 +159,7 @@ fn parse_return(i: &str) -> IResult<&str, Expr> {
 /// is any type annotation. This allows the type annotation to nest other
 /// structural types. e.g. (t1, (t2, t3), t1 -> t2)
 fn parse_type_tuple(i: &str) -> IResult<&str, ParsedType> {
-    let mut parser =
+    let parser =
         verify(
             delimited(
                 terminated(tag("("), space0),
@@ -305,8 +305,8 @@ fn parse_unary_expr(input: &str) -> IResult<&str, Expr> {
 /// Parses a unary expression
 fn parse_unary_op(input: &str) -> IResult<&str, UOp> {
     preceded(space0, alt((
-        map(tag("-"), |s: &str| UOp::Negative),
-        map(tag("!"), |s: &str| UOp::Negate),
+        map(tag("-"), |_s: &str| UOp::Negative),
+        map(tag("!"), |_s: &str| UOp::Negate),
     )))(input)
 }
 
