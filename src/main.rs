@@ -1,9 +1,11 @@
 mod syntax;
 mod parser;
 mod typechecker;
+mod generator;
 
 use parser::program;
 use typechecker::tc_program;
+use generator::generate;
 
 
 /// Verify a program through parsing & Typechecking
@@ -12,9 +14,12 @@ fn verify(prog: &str) {
     match program(prog) {
         Ok((_, parsed_prog)) => {
             println!("* program parsed successfully");
-            match tc_program(parsed_prog) {
-                Ok((_, s)) => {
+            match tc_program(&parsed_prog) {
+                Ok((_, _s)) => {
                     println!("* program typechecked successfully");
+                    println!("* generated GLSL:");
+                    // print generated GLSL
+                    println!("{}", generate(parsed_prog));
                 },
                 Err(e)  => println!("!! Failed to TC program: {:?}", e)
             }
@@ -46,9 +51,9 @@ fn main() {
         _          => vec![]
     };
     println!("\n\nPARSED PROGRAM: {:?}\n\n", res);
-    println!("TYPECHECKED PROGRAM: {:?}\n\n", tc_program(res));
+    println!("TYPECHECKED PROGRAM: {:?}\n\n", tc_program(&res));
 
-    let r1 = program("(x:1, y:2)");
+    let _r1 = program("(x:1, y:2)");
     let r2 = program("1+1\n");
     println!("{:?}", r2);
 
