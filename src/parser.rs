@@ -579,6 +579,10 @@ fn test_parse_vect() {
     assert_eq!(parse_expr("(1,true)"), Ok(("", Expr::Vect(vec![Expr::I(1),Expr::B(true)]))), "Failed to parse a mixed vect");
     assert_eq!(parse_expr("(3,)").is_ok(), false, "Recognized an invalid tuple statement");
     assert_eq!(parse_expr("(,3)").is_ok(), false, "Recognized another invalid tuple statement");
+
+    // test assigned vects with & without 'f' modifier to float values
+    assert!(parse_expr("let color: (float,float,float,float) = (1.0, 0.5, 0.5, 1.0)\n").is_ok(), "Failed to parsed assigned tuple");
+    assert!(parse_expr("let color: (float,float,float,float) = (1.0f, 0.5f, 0.5f, 1.0f)\n").is_ok(), "Failed to parsed assigned tuple with 'f's");
 }
 
 /// Tests parsing vectors with names (akin to structs)

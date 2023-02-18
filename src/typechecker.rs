@@ -744,6 +744,11 @@ fn tc_expr(e: &Expr, mut env: TCEnv) -> TCResult {
             tc_pass(ParsedType::Tuple(tup_type), env)
         },
 
+        Expr::Comment(_) => {
+            // always pass for comments
+            tc_pass(ParsedType::BaseType("NONE".to_string()), env)
+        },
+
 
         // fill in the rest here, and just call out the relevant handler
         _ => tc_fail(format!("Unrecognized expression '{:?}'", e))

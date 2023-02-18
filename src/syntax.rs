@@ -168,7 +168,7 @@ pub enum Expr {
         e2: Box<Expr>,
     },
     Update {
-        target: String,
+        target: String, // this is the part where we can update existing bindings, as well as update things like position & color (vert & frag respectively)
         value: Box<Expr>,
     },
     Branch {

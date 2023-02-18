@@ -7,7 +7,6 @@ use parser::program;
 use typechecker::tc_program;
 use generator::generate;
 
-
 /// Verify a program through parsing & Typechecking
 fn verify(prog: &str) {
     println!("Verifying program: \n\n{}", prog);
@@ -17,9 +16,6 @@ fn verify(prog: &str) {
             match tc_program(&parsed_prog) {
                 Ok((_, _s)) => {
                     println!("* program typechecked successfully");
-                    println!("* generated GLSL:");
-                    // print generated GLSL
-                    println!("{}", generate(parsed_prog));
                 },
                 Err(e)  => println!("!! Failed to TC program: {:?}", e)
             }
@@ -29,6 +25,11 @@ fn verify(prog: &str) {
 }
 
 fn main() {
+
+    // Easy to test shaders with something like
+    // https://shdr.bkcore.com/
+    // or some other site, there's plenty of these lying around
+
     let prog = "\
     let swap : (int, int) -> (int, int) = (x : int, y : int) { \n\
     \t(y,x)\n\
@@ -57,6 +58,11 @@ fn main() {
     let r2 = program("1+1\n");
     println!("{:?}", r2);
 
+    // program that only sets color
+    let prog2 = "// some comment\nlet color: (float,float,float,float) = (1.0f, 0.5f, 0.5f, 1.0f)\n";
+    let gen = generate_glsl_from_fdssl(prog2.to_string());
+    println!("\nGenerated GLSL:\n{}",gen);
+
     // let x = DefMut {
     //     name: "x".to_string(),
     //     value: Box::new(
@@ -69,4 +75,25 @@ fn main() {
     //         }
     //     ),
     // };
+}
+
+// Helper to parse, typecheck, and generate code from FDSSL
+fn generate_glsl_from_fdssl(prog: String) -> String {
+    let parse_result = program(&prog);
+    assert!(parse_result.is_ok(), "Failed to parse with error: {}", parse_result.unwrap_err());
+    let (_,ast) = parse_result.unwrap();
+
+    let tc_result = tc_program(&ast);
+    assert!(tc_result.is_ok(), "Failed to typecheck with error: {}", tc_result.unwrap_err());
+
+    return generate(ast);
+}
+
+/// General Tests...
+
+#[test]
+fn test_simple_frag_generates() {
+    let prog = "// test comment\nlet color: (float,float,float,float) = (1.0f,0.5f,0.5f,1.0f)\n".to_string();
+    let generated_result = generate_glsl_from_fdssl(prog);
+    println!("Simple Frag program:\n{}", generated_result);
 }
