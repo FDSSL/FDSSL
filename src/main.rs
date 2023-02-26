@@ -63,6 +63,9 @@ fn main() {
     let gen = generate_glsl_from_fdssl(prog2.to_string());
     println!("\nGenerated GLSL:\n{}",gen);
 
+    let gen2 = generate_glsl_from_fdssl(prog.to_string());
+    println!("\nGenerated GLSL 2:\n{}",gen2);
+
     // let x = DefMut {
     //     name: "x".to_string(),
     //     value: Box::new(
