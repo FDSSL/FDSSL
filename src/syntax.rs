@@ -18,12 +18,25 @@ pub enum Type {
 /// This enum is not meant to be used outside the parser and type checker
 /// as it simply denotes the structure of the type rather than any type
 /// space the type occupies.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ParsedType {
     BaseType(String),
     Tuple(Vec<ParsedType>),
     NamedTuple(Vec<(String, Box<ParsedType>)>), // stores indexed types for named tuples
     Function(Box<ParsedType>, Box<ParsedType>),
+}
+
+/**
+ * Returns whether a Tuple type is homogenous
+ */
+pub fn is_homogenous_tuple(pt: &ParsedType) -> bool {
+    match pt {
+        ParsedType::Tuple(v)    => {
+            let first = &v[0];
+            return v.iter().all(|t| *t == *first);
+        },
+        _   => true
+    }
 }
 
 /// User friendly dipslyaing of parsed types in TypeChecker errors
@@ -32,22 +45,22 @@ impl fmt::Display for ParsedType {
         match &*self {
             ParsedType::BaseType(s)     => write!(f, "{}", s),
             ParsedType::Tuple(v)        => {
-                write!(f, "(");
+                let _r1 = write!(f, "(");
                 for (i,t) in v.into_iter().enumerate() {
-                    write!(f, "{}", t);
+                    let _r2 = write!(f, "{}", t);
                     if i < (v.len()-1) {
-                        write!(f, ", ");
+                        let _r3 = write!(f, ", ");
                     }
                 }
                 write!(f, ")")
             },
             ParsedType::Function(t1,t2) => write!(f, "{} -> {}", format!("{}",t1), format!("{}",t2)),
             ParsedType::NamedTuple(v)   => {
-                write!(f, "(");
+                let _r1 = write!(f, "(");
                 for (i,t) in v.into_iter().enumerate() {
-                    write!(f, "{}:{}", t.0, *t.1);
+                    let _r2 = write!(f, "{}:{}", t.0, *t.1);
                     if i < (v.len()-1) {
-                        write!(f, ", ");
+                        let _r3 = write!(f, ", ");
                     }
                 }
                 write!(f, ")")
@@ -168,7 +181,7 @@ pub enum Expr {
         e2: Box<Expr>,
     },
     Update {
-        target: String,
+        target: String, // this is the part where we can update existing bindings, as well as update things like position & color (vert & frag respectively)
         value: Box<Expr>,
     },
     Branch {

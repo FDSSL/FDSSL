@@ -24,7 +24,7 @@ use nom::combinator::{map, verify, recognize, peek, opt, fail, not, eof};
 macro_rules! bop {
     ( $i:expr , $b:expr) => {
         {
-            map(tag($i), |s: &str| $b)
+            map(tag($i), |_s: &str| $b)
         }
     };
 }
@@ -159,7 +159,7 @@ fn parse_return(i: &str) -> IResult<&str, Expr> {
 /// is any type annotation. This allows the type annotation to nest other
 /// structural types. e.g. (t1, (t2, t3), t1 -> t2)
 fn parse_type_tuple(i: &str) -> IResult<&str, ParsedType> {
-    let mut parser =
+    let parser =
         verify(
             delimited(
                 terminated(tag("("), space0),
@@ -305,8 +305,8 @@ fn parse_unary_expr(input: &str) -> IResult<&str, Expr> {
 /// Parses a unary expression
 fn parse_unary_op(input: &str) -> IResult<&str, UOp> {
     preceded(space0, alt((
-        map(tag("-"), |s: &str| UOp::Negative),
-        map(tag("!"), |s: &str| UOp::Negate),
+        map(tag("-"), |_s: &str| UOp::Negative),
+        map(tag("!"), |_s: &str| UOp::Negate),
     )))(input)
 }
 
@@ -579,6 +579,10 @@ fn test_parse_vect() {
     assert_eq!(parse_expr("(1,true)"), Ok(("", Expr::Vect(vec![Expr::I(1),Expr::B(true)]))), "Failed to parse a mixed vect");
     assert_eq!(parse_expr("(3,)").is_ok(), false, "Recognized an invalid tuple statement");
     assert_eq!(parse_expr("(,3)").is_ok(), false, "Recognized another invalid tuple statement");
+
+    // test assigned vects with & without 'f' modifier to float values
+    assert!(parse_expr("let color: (float,float,float,float) = (1.0, 0.5, 0.5, 1.0)\n").is_ok(), "Failed to parsed assigned tuple");
+    assert!(parse_expr("let color: (float,float,float,float) = (1.0f, 0.5f, 0.5f, 1.0f)\n").is_ok(), "Failed to parsed assigned tuple with 'f's");
 }
 
 /// Tests parsing vectors with names (akin to structs)
