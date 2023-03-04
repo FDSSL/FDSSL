@@ -35,15 +35,19 @@ fn main() {
     \t(y,x)\n\
     }\n\
     \n\
-    let apply : (int -> int, int) -> int = (f: int -> int, v: int) {\n\
-    \tf(v)\n\
-    }\n\
+    //let apply : (int -> int, int) -> int = (f: int -> int, v: int) {\n\
+    //\tf(v)\n\
+    //}\n\
     \n\
     let double: int -> int = (x: int) {\n\
+        let z1: int = x\n\
+        let z2: int = x\n\
     \tx*2\n\
     }\n\
     \n\
-    apply(double,8)\n\
+   //apply(double,8)\n\
+   double(8)
+   \n\
     ";
     verify(prog);
     
@@ -61,10 +65,10 @@ fn main() {
     // program that only sets color
     let prog2 = "// some comment\nlet color: (float,float,float,float) = (1.0f, 0.5f, 0.5f, 1.0f)\n";
     let gen = generate_glsl_from_fdssl(prog2.to_string());
-    println!("\nGenerated GLSL:\n{}",gen);
+    println!("\n:::: Generated GLSL :::::\n{}",gen);
 
     let gen2 = generate_glsl_from_fdssl(prog.to_string());
-    println!("\nGenerated GLSL 2:\n{}",gen2);
+    println!("\n:::: Generated GLSL 2 :::::\n{}",gen2);
 
     // let x = DefMut {
     //     name: "x".to_string(),

@@ -2,7 +2,7 @@
     Generator to produce GLSL code from FDSSL
  */
 
-use crate::syntax::{self, Expr, ParsedType};
+use crate::syntax::{self, Expr, ParsedType, is_homogenous_tuple};
 
 use itertools::Itertools;
 use syntax::Program;
@@ -46,7 +46,7 @@ pub fn generate(prog: Program) -> String {
     // let glsl_program: String = generated_program.headerSection.join("\n");
     let glsl_program = "
 void main() {\n".to_owned() + &result.join("\n") + "\n}\n";
-    println!("{:#?}", generated_program);
+    println!("\n:::: GENERATED PROGRAM :::::\n{:#?}", generated_program);
 
     // TODO, may make more sense to produce a simple IR as part of generation
     // Would first walk the tree to find information about:
@@ -96,14 +96,16 @@ void main() {\n".to_owned() + &result.join("\n") + "\n}\n";
     // just assume we're only producing a generic shader for now
 
     // VERIFY this shader
-    println!("{}", glsl_program);
-    let parsed_glsl_program = ShaderStage::parse(glsl_program.clone());
+    println!("\n:::: GLSL PROGRAM ::::\n{}", glsl_program);
+    let final_glsl_program: &String = &format!("{}\n{}", generated_program.funcSection, glsl_program);
+    println!("\n:::: FINAL GLSL PROGRAM ::::\n{}", final_glsl_program);
+    let parsed_glsl_program = ShaderStage::parse(final_glsl_program);
     assert!(
         parsed_glsl_program.is_ok(),
         "Failed to verify resulting GLSL program: {}",
         parsed_glsl_program.unwrap_err().info
     );
-    return glsl_program;
+    return final_glsl_program.to_string();
 }
 
 fn generate_expr(gp: &mut GeneratedProgram, expr: &Expr) -> String {
@@ -119,8 +121,9 @@ fn generate_expr(gp: &mut GeneratedProgram, expr: &Expr) -> String {
             // TODO replace 'void' below with the proper 'output' type from 'typ' (which is either a function type, or something that only returns a regular type)
             return match &**value {
                 Expr::Abs { params: _, body: _ } => {
+                    // function abstraction to lift up to the top level
                     let return_type = generate_function_return_type(gp, typ);
-                    let out = vec![return_type.to_string(), name.to_string(), generate_expr(gp, value)].join(" ") + ";";
+                    let out = vec![return_type.to_string(), name.to_string(), generate_expr(gp, value), "\n".to_string()].join(" ");
                     // lift this whole expression up into the global scope, and not locally here
                     gp.funcSection.push_str(out.clone().as_str());
                     // don't return anything directly here
@@ -149,7 +152,7 @@ fn generate_expr(gp: &mut GeneratedProgram, expr: &Expr) -> String {
         Expr::Comment(v) => v.into_iter().map(|c| "//".to_owned() + &c).join("\n"),
         Expr::Abs { params, body } => {
             // treat as a function
-            return "(".to_owned() + &params.into_iter().map(|(n,t)| generate_type(gp,t) + " " + n).join(",") + ") {\n" + &body.into_iter().map(|e| generate_expr(gp,e)).join(";") + "\n}\n";
+            return "(".to_owned() + &params.into_iter().map(|(n,t)| generate_type(gp,t) + " " + n).join(",") + ") {\n" + &body.into_iter().map(|e| generate_expr(gp,e)).join(";") + ";\n}\n";
         },
         Expr::App { fname, arguments } => {
             return fname.to_owned() + "(" + &arguments.into_iter().map(|arg| generate_expr(gp, arg)).join(",") + ");";
@@ -159,7 +162,10 @@ fn generate_expr(gp: &mut GeneratedProgram, expr: &Expr) -> String {
 }
 
 fn generate_function_return_type(gp: &mut GeneratedProgram, typ: &ParsedType) -> String {
-    return generate_type(gp, typ);
+    match typ {
+        ParsedType::Function(_, b) => generate_type(gp, b),
+        _ => panic!("Unable to generate return type for non-function type, {}", typ)
+    }
 }
 
 fn generate_type(gp: &mut GeneratedProgram, typ: &ParsedType) -> String {
@@ -167,21 +173,28 @@ fn generate_type(gp: &mut GeneratedProgram, typ: &ParsedType) -> String {
         ParsedType::BaseType(bt)    => bt.to_string(),
         ParsedType::Tuple(v)    =>  {
             // check if all types are the same
-            let isHomogenous = v.into_iter().any(|t| *t != v[0]);
-            if isHomogenous {
+            if is_homogenous_tuple(typ) {
                 // express using a vec of the fixed length
 
-                return match v[0] {
-                    ParsedType::BaseType("int") => "ivec".to_owned() + &v.len().to_string(),
-                    ParsedType::BaseType("float") => "vec".to_owned() + &v.len().to_string(),
-                    ParsedType::BaseType("double") => "vec".to_owned() + &v.len().to_string()
+                return match &v[0] {
+                    ParsedType::BaseType(t) => match &t as &str {
+                        // handle ints specially
+                        "int"   => "ivec".to_owned() + &v.len().to_string(),
+                        // treat the rest as standard float/double vec (imprecise, but works for now)
+                        // TODO @montymxb, specialize this to handle vectors of different types as well
+                        _       => "vec".to_owned() + &v.len().to_string()
+                    },
+                    _ => todo!("Unable to generate homogenous type for non-primitive type: {:?}", v[0])
                 }
             } else {
-                // express as a struct type and add the name as a lookup in the future into our GeneratedProgram state
                 // TODO need to add a feature that captures a named lookup (i.e., future references to this type get the name, not the type itself here)
+                // express as a struct type and add the name as a lookup in the future into our GeneratedProgram state
+                // TODO TEMPSTRUCTNAME should be replaced with a generated struct name (this is only a placeholder here)
+                let mut indices = 0..;
+                return format!("struct TEMPSTRUCTNAME {{\n{};\n}};\n", &v.iter().map(|i| "i".to_owned() + &indices.next().unwrap().to_string() + " " + &generate_type(gp, i)).join(";\n"));
             }
         },
-        ParsedType::Function(t1,t2) => {
+        ParsedType::Function(_t1,_t2) => {
             // do nothing, an abstraction will fill in the type as needed
             return "\n".to_string();
         },

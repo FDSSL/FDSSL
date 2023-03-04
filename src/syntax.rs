@@ -18,12 +18,25 @@ pub enum Type {
 /// This enum is not meant to be used outside the parser and type checker
 /// as it simply denotes the structure of the type rather than any type
 /// space the type occupies.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ParsedType {
     BaseType(String),
     Tuple(Vec<ParsedType>),
     NamedTuple(Vec<(String, Box<ParsedType>)>), // stores indexed types for named tuples
     Function(Box<ParsedType>, Box<ParsedType>),
+}
+
+/**
+ * Returns whether a Tuple type is homogenous
+ */
+pub fn is_homogenous_tuple(pt: &ParsedType) -> bool {
+    match pt {
+        ParsedType::Tuple(v)    => {
+            let first = &v[0];
+            return v.iter().all(|t| *t == *first);
+        },
+        _   => true
+    }
 }
 
 /// User friendly dipslyaing of parsed types in TypeChecker errors
