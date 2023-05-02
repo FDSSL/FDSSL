@@ -64,7 +64,29 @@ use std::collections::{HashMap, HashSet};
 
 // Type env, contains bindings of 'things' to types...these can be Exprs or Names
 // w/ a HashMap our insertions & lookups pretty bad at O(n), but that's in the worst possible case, on average we should be seeing O(1)
-type TCEnv = HashMap<String,ParsedType>;
+// type TCEnv = HashMap<String,ParsedType>;
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct TCEnv {
+    env: HashMap<String, ParsedType>,
+    acc: HashSet<ParsedType>,
+}
+
+impl TCEnv {
+    pub fn insert(&mut self, n: String, t: ParsedType) -> Option<ParsedType> {
+        self.env.insert(n, t)
+
+    }
+    pub fn get(&self, n: &str) -> Option<&ParsedType> {
+        self.env.get(&n.to_string())
+    }
+    pub fn new() -> TCEnv {
+        TCEnv { env: HashMap::new(), acc: HashSet::new() }
+    }
+    pub fn accumulate(&self, env: TCEnv) {
+        self.acc.extend(env.acc.into_iter())
+    }
+}
+
 
 // A positive type checked result
 pub type TypeChecked = (ParsedType,TCEnv);
@@ -99,13 +121,13 @@ fn tc_fail(e: String) -> TCResult {
 fn tc_lookup(n: &str, env: &TCEnv) -> Result<ParsedType,TCError> {
     match env.get(n) {
         Some(v) => Ok((*v).clone()),
-        None => Err(format!("Non-existant binding '{}' referenced, perhaps you meant to declare it first with 'let' or 'mut'?", n)),
+        None => Err(format!("Non-existant binding '{n}' referenced, perhaps you meant to declare it first with 'let' or 'mut'?")),
     }
 }
 
 /// Attempts to typecheck a program
 pub fn tc_program(p: Program) -> TCResult {
-    let env : TCEnv = HashMap::new();
+    let env = TCEnv { env: HashMap::new(), acc: HashSet::new()};
     tc_body(p, &env)
 }
 
@@ -162,18 +184,17 @@ fn mk_bin_func(t: ParsedType) -> ParsedType {
 
 /// Returns whether a binary operator produces a numeric value
 fn op_num_type(bop: &syntax::BOp) -> bool {
-    match bop {
-        syntax::BOp::Mod => true,
-        syntax::BOp::Gt  => true,
-        syntax::BOp::Gte => true,
-        syntax::BOp::Lte => true,
-        syntax::BOp::Lt  => true,
-        syntax::BOp::Add => true,
-        syntax::BOp::Sub => true,
-        syntax::BOp::Mul => true,
-        syntax::BOp::Div => true,
-        _ => false,
-    }
+    matches!(bop,
+        syntax::BOp::Mod |
+        syntax::BOp::Gt  |
+        syntax::BOp::Gte |
+        syntax::BOp::Lte |
+        syntax::BOp::Lt  |
+        syntax::BOp::Add |
+        syntax::BOp::Sub |
+        syntax::BOp::Mul |
+        syntax::BOp::Div
+    )
 }
 
 /// Returns the type that corresponds to a given BinOp
@@ -190,13 +211,13 @@ fn bop_type(bop: syntax::BOp, a1t: &ParsedType, a2t: &ParsedType) -> Result<Pars
     match (a1t, a2t) {
         (BaseType(b1), BaseType(b2)) => {
             if ! types.contains(b1) {
-                Err(format!("Type {} is not supported by binary operations", b1))
+                Err(format!("Type {b1} is not supported by binary operations"))
             }
             else if ! types.contains(b2) {
-                Err(format!("Type {} is not supported by binary operations", b2))
+                Err(format!("Type {b2} is not supported by binary operations"))
             }
             else if (b1 == "bool" || b2 == "bool") && op_num_type(&bop) {
-                Err(format!("Operator {} does not support bool as an argument", bop))
+                Err(format!("Operator {bop} does not support bool as an argument"))
             }
             else {
                 let (arg1, arg2) = ((*a1t).clone(), (*a2t).clone());
@@ -494,41 +515,47 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
         // Function application
         Expr::App{fname: f, arguments: args} => {
             // verify that this name exists
-            let res = tc_lookup(&f, &env);
-            if res.is_err() {
-                return tc_fail(format!("Function {} does not exist", f));
+            let (argType, returnType) = match tc_lookup(&f, &env) {
+                Ok(Function(argType, returnType)) => Ok((argType, returnType)),
+                Ok(_) => Err(format!("Variable {f} is not a function.")),
+                Err(a) => Err(a),
+            }?;
+
+
+            if argType.arity() != args.len() {
+                return tc_fail(format!("Incorrect number of arguments passed to function {f}"));
             }
 
-            // verify that our function is actually a function
-            // and if so, extract the arg & return types
-            let maybeFunc = tc_lookup(&f, &env)?;
-            let (argType, retType) = if let Function(a,r) = maybeFunc {
-                (a,r)
-            }
-            else {
-                return tc_fail(format!("Variable {} is not a function!", f));
-            };
 
-            // verify that we have the correct # of args
-            if type_arity(*argType.clone()) != args.len() {
-                return tc_fail(format!("Incorrect number of arguments passed to f {}", f));
-            }
+            let typecheckedArgs = args.into_iter().fold(
+                Ok((BaseType("".to_string()), env.clone())),
+                |acc, elt| {
+                    if let Ok((_, accEnv)) = acc {
+                        env.accumulate(accEnv);
+                        tc_expr(elt, env)
+                    }
+                    else {
+                        acc
+                    }
+                }
+            );
+
+
             let l2 = args.len();
 
             // compute argument types
             // TODO @montymxb argument evaluation should update the environment instead of just cloning it
             let mut mutEnv = env.clone();
-            let maybeArgTypesComputed: Vec<Result<(ParsedType, HashMap<String, ParsedType>), String>> = args.into_iter().map(|e| tc_expr(e, mutEnv.clone())).collect();
 
-            let maybeArgTypesComputedLen = maybeArgTypesComputed.as_slice().len();
+            let typecheckedArgsLen = typecheckedArgs.as_slice().len();
 
             // check that the lengths match up
-            if maybeArgTypesComputedLen != l2 {
+            if typecheckedArgsLen != l2 {
                 return tc_fail(format!("Incorrect number of arguments supplied to function {}", f));
             }
 
             // verify that all of these are success (on any failures, we should just exit out)
-            for argResult in maybeArgTypesComputed.as_slice() {
+            for argResult in typecheckedArgs.as_slice() {
                 if argResult.is_err() {
                     return tc_fail(format!("Failed to typecheck argument of function {}", f));
                 }
@@ -536,12 +563,12 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
             // before checking look to lift the supplied args into a tuple
             // this will let us easily check the two types in a single go
-            let argTypesComputed = maybeArgTypesComputed.into_iter().filter(|atc| atc.is_ok()).map(|atc| {
+            let argTypesComputed = typecheckedArgs.into_iter().filter(|atc| atc.is_ok()).map(|atc| {
                 let (p,_) = atc.unwrap();
                 return p;
             }).collect_vec();
             let mut argPTComputed : ParsedType;
-            if maybeArgTypesComputedLen > 1 {
+            if typecheckedArgsLen > 1 {
                 // unpack & wrap in a tuple
                 argPTComputed = Tuple(argTypesComputed);
             } else {
@@ -774,7 +801,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 /// Tests typechecker env lookup behavior
 #[test]
 fn test_tc_lookup() {
-    let mut tcEnv: TCEnv = HashMap::new();
+    let mut tcEnv: TCEnv = TCEnv::new();
     let bt: ParsedType = typ("SomeString");
     tcEnv.insert("key".to_string(), bt.clone());
 
@@ -799,7 +826,7 @@ fn test_tc_lookup() {
 
 #[test]
 fn test_tc_body() {
-    let tcEnv: TCEnv = HashMap::new();
+    let tcEnv = TCEnv::new();
 
     // typecheck an empty body, should fail
     let body: Vec<Expr> = vec![];
@@ -882,7 +909,7 @@ macro_rules! assert_ok {
 /// Typecheck various expressions
 #[test]
 fn test_tc_expr() {
-    let mut tcEnv: TCEnv = HashMap::new();
+    let mut tcEnv: TCEnv = TCEnv::new();
     tcEnv.insert("ref".to_string(), typ("int"));
     tcEnv.insert("add".to_string(), mk_bin_func(typ("int")));
 
