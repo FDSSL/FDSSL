@@ -82,7 +82,7 @@ impl TCEnv {
     pub fn new() -> TCEnv {
         TCEnv { env: HashMap::new(), acc: HashSet::new() }
     }
-    pub fn accumulate(&self, env: TCEnv) {
+    pub fn accumulate(&mut self, env: TCEnv) {
         self.acc.extend(env.acc.into_iter())
     }
 }
@@ -522,65 +522,53 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
             }?;
 
 
+            // Check if the number of arguments matches the parameters
             if argType.arity() != args.len() {
                 return tc_fail(format!("Incorrect number of arguments passed to function {f}"));
             }
 
-
-            let typecheckedArgs = args.into_iter().fold(
-                Ok((BaseType("".to_string()), env.clone())),
-                |acc, elt| {
-                    if let Ok((_, accEnv)) = acc {
-                        env.accumulate(accEnv);
-                        tc_expr(elt, env)
-                    }
-                    else {
-                        acc
-                    }
-                }
-            );
-
-
-            let l2 = args.len();
-
-            // compute argument types
-            // TODO @montymxb argument evaluation should update the environment instead of just cloning it
-            let mut mutEnv = env.clone();
-
-            let typecheckedArgsLen = typecheckedArgs.as_slice().len();
-
-            // check that the lengths match up
-            if typecheckedArgsLen != l2 {
-                return tc_fail(format!("Incorrect number of arguments supplied to function {}", f));
+            // What if it's a function with no arguments?
+            if argType.arity() == 0 {
+                return tc_pass(*returnType, env);
             }
 
-            // verify that all of these are success (on any failures, we should just exit out)
-            for argResult in typecheckedArgs.as_slice() {
-                if argResult.is_err() {
-                    return tc_fail(format!("Failed to typecheck argument of function {}", f));
+            // Typecheck arguments
+            let tcArgs : Vec<Result<ParsedType, _>> = args.into_iter().map(
+                |elt| {
+                    match tc_expr(elt, env.clone()) {
+                        Ok((t, e2)) => {
+                            env.accumulate(e2);
+                            Ok(t)
+                        },
+                        Err(e) => Err(e),
+                    }
                 }
+            ).collect();
+
+            // Error if there are any typecheck failures.
+            if tcArgs.iter().any(Result::is_err) {
+                return tc_fail(format!("Failed to typecheck argument of function {f}"));
             }
+
+            // Remove result type
+            let tcArgs : Vec<ParsedType> = tcArgs.into_iter().map(Result::unwrap).collect();
+
 
             // before checking look to lift the supplied args into a tuple
             // this will let us easily check the two types in a single go
-            let argTypesComputed = typecheckedArgs.into_iter().filter(|atc| atc.is_ok()).map(|atc| {
-                let (p,_) = atc.unwrap();
-                return p;
-            }).collect_vec();
-            let mut argPTComputed : ParsedType;
-            if typecheckedArgsLen > 1 {
-                // unpack & wrap in a tuple
-                argPTComputed = Tuple(argTypesComputed);
-            } else {
-                // just the single value
-                argPTComputed = argTypesComputed[0].clone();
-
+            let tcArgs : ParsedType = if tcArgs.len() > 1 {
+                Tuple(tcArgs)
             }
+            else {
+                tcArgs[0].clone()
+            };
+
+
             
             // type check the args
-            if argPTComputed == *argType {
+            if tcArgs == *argType {
                 // valid, return the function's return type
-                return tc_pass(*retType, env);
+                return tc_pass(*returnType, env);
             }
             else {
                 // fail, type mismatch!
@@ -929,5 +917,10 @@ fn test_tc_expr() {
     // TODO @montymxb add test for do/while (instead of for), we can desugar that as needed I think
     // TODO @montymxb test for Abstraction would be good
     // TODO @montymxb test for branch would be good here too
+
+}
+#[test]
+test_tc_app() {
+    let mut env : TCEnv = TCEnv::new();
 
 }
