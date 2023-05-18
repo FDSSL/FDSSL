@@ -575,7 +575,9 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
             else {
                 // fail, type mismatch!
                 // TODO, improve message
-                tc_fail("Function typecheck failed".to_string())
+                tc_fail(
+                    format!("Function {f} expected parameter type {argType} but received {tcArgs}")
+                )
             }
         }
 
@@ -946,7 +948,7 @@ fn test_tc_app() {
     // Test for function with no parameters
     let onePFuncT : ParsedType = Function(
             Box::new(
-                Tuple(vec![BaseType("int".to_string())])
+                BaseType("int".to_string())
             ),
             Box::new(
                 BaseType("int".to_string())
