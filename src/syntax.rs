@@ -128,13 +128,13 @@ pub struct Parameter {
     datatype: Type,
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Clone)]
 pub enum AccessType {
     Name(String),
     Idx(Box<Expr>)
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq, Clone)]
 pub enum Expr {
     I(i32),
     B(bool),

@@ -523,8 +523,10 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
 
             // Check if the number of arguments matches the parameters
+            let expected = argType.arity();
+            let provided = args.len();
             if argType.arity() != args.len() {
-                return tc_fail(format!("Incorrect number of arguments passed to function {f}"));
+                return tc_fail(format!("Incorrect number of arguments passed to function {f}: Expected {expected}, provided {provided}"));
             }
 
             // What if it's a function with no arguments?
@@ -568,12 +570,12 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
             // type check the args
             if tcArgs == *argType {
                 // valid, return the function's return type
-                return tc_pass(*returnType, env);
+                tc_pass(*returnType, env)
             }
             else {
                 // fail, type mismatch!
                 // TODO, improve message
-                return tc_fail("Function typecheck failed".to_string());
+                tc_fail("Function typecheck failed".to_string())
             }
         }
 
@@ -920,7 +922,48 @@ fn test_tc_expr() {
 
 }
 #[test]
-test_tc_app() {
+fn test_tc_app() {
     let mut env : TCEnv = TCEnv::new();
+
+    // Test for function with no parameters
+    let noPFuncT : ParsedType = Function(
+            Box::new(
+                Tuple(Vec::new())
+            ),
+            Box::new(
+                BaseType("int".to_string())
+            )
+        );
+    let noPFuncE : syntax::Expr = syntax::Expr::App{fname: "noparm".to_string(), arguments: Vec::new()};
+
+    env.insert(
+        "noparm".to_string(),
+        noPFuncT.clone()
+    );
+
+    assert_eq!(tc_expr(noPFuncE.clone(), env.clone()), Ok((BaseType("int".to_string()), env.clone())));
+
+    // Test for function with no parameters
+    let onePFuncT : ParsedType = Function(
+            Box::new(
+                Tuple(vec![BaseType("int".to_string())])
+            ),
+            Box::new(
+                BaseType("int".to_string())
+            )
+        );
+    let onePFuncE : syntax::Expr = syntax::Expr::App{
+        fname: "oneparm".to_string(),
+        arguments: vec![
+            noPFuncE.clone()
+        ]
+    };
+
+    env.insert(
+        "oneparm".to_string(),
+        onePFuncT.clone()
+    );
+
+    assert_eq!(tc_expr(onePFuncE, env.clone()), Ok((BaseType("int".to_string()), env.clone())));
 
 }
