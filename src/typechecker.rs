@@ -157,15 +157,6 @@ fn tc_body(body: Vec<Expr>, env: &TCEnv) -> TCResult {
 }
 
 
-/// Returns the immediate arity of a given type w/ a depth of 0
-/// All types return 1 except for tuples
-fn type_arity(t: ParsedType) -> usize {
-    match t {
-        Tuple(v)    => v.len(), // get arity of this tuple, disregarding nesting of other tuples
-        _           => 1 // all others are 1
-    }
-}
-
 /// Helper to make a function type
 fn mk_func_typ(t1: ParsedType, t2: ParsedType) -> ParsedType {
     Function(Box::new(t1), Box::new(t2))
@@ -267,11 +258,11 @@ fn uop_type(uop: UOp, arg: ParsedType) -> Result<ParsedType, TCError> {
     match arg {
         BaseType(n) => {
             match (uop, n.as_str()) {
-                (Negative, "int")      => Ok(mk_func_typ(arg1, arg2)),
-                (Negative, "float")    => Ok(mk_func_typ(arg1, arg2)),
-                (Negative, "double")   => Ok(mk_func_typ(arg1, arg2)),
+                (syntax::UOp::Negative, "int")      => Ok(mk_func_typ(arg1, arg2)),
+                (syntax::UOp::Negative, "float")    => Ok(mk_func_typ(arg1, arg2)),
+                (syntax::UOp::Negative, "double")   => Ok(mk_func_typ(arg1, arg2)),
         
-                (Negate, "bool")   => Ok(mk_func_typ(arg1, arg2)),
+                (syntax::UOp::Negate, "bool")   => Ok(mk_func_typ(arg1, arg2)),
 
                 _ => Err(format!("Invalid marghing of unary op {uop} with an argument type {n}"))
             }
@@ -557,7 +548,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
 
             // before checking look to lift the supplied args into a tuple
-            // this will let us easily check the two types in a single go
+            // This is how Abs expressions are typed.
             let tcArgs : ParsedType = if tcArgs.len() > 1 {
                 Tuple(tcArgs)
             }
@@ -671,7 +662,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
         Expr::Branch{condition: c, b1: b1, b2: b2} => {
             let (t1,env1) = tc_expr(*c, env)?;
             if t1 != BaseType("bool".to_string()) {
-                return tc_fail(format!("'If' was expecting an expression of type 'bool', but got an expression of type '{t1}' instead"));
+                tc_fail(format!("'If' was expecting an expression of type 'bool', but got an expression of type '{t1}' instead"))
 
             } else {
                 // verify the types of b1 & b2 match
@@ -687,7 +678,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
                 } else {
                     // body types do NOT match, fail
-                    return tc_fail(format!("'If' branches were expected to have the same type, but have differing types of '{tb1}' and '{tb2}' instead"));
+                    tc_fail(format!("'If' branches were expected to have the same type, but have differing types of '{tb1}' and '{tb2}' instead"))
 
                 }
             }
@@ -833,22 +824,22 @@ fn test_tc_body() {
 #[test]
 fn test_type_arity() {
     // base type
-    let a1: usize = type_arity(BaseType("".to_string()));
+    let a1: usize = BaseType("".to_string()).arity();
     // tuple
-    let a2: usize = type_arity(Tuple(vec![
+    let a2: usize = Tuple(vec![
         typ("a"),
         typ("b"),
         typ("c")
-    ]));
+    ]).arity();
     // named tuple
-    let a3: usize = type_arity(NamedTuple(vec![
+    let a3: usize = NamedTuple(vec![
         ("".to_string(), Box::new(typ("e")))
-    ]));
+    ]).arity();
     // function type
-    let a4: usize = type_arity(Function(
+    let a4: usize = Function(
         Box::new(typ("a")),
         Box::new(typ("b"))
-    ));
+    ).arity();
 
     assert_eq!(a1, 1, "Arity was wrong for a BaseType");
     assert_eq!(a2, 3, "Arity was wrong for a Tuple");
@@ -943,7 +934,8 @@ fn test_tc_app() {
         noPFuncT.clone()
     );
 
-    assert_eq!(tc_expr(noPFuncE.clone(), env.clone()), Ok((BaseType("int".to_string()), env.clone())));
+    assert_eq!(tc_expr(noPFuncE.clone(), env.clone()),
+               Ok((BaseType("int".to_string()), env.clone())));
 
     // Test for function with no parameters
     let onePFuncT : ParsedType = Function(
@@ -966,6 +958,35 @@ fn test_tc_app() {
         onePFuncT.clone()
     );
 
-    assert_eq!(tc_expr(onePFuncE, env.clone()), Ok((BaseType("int".to_string()), env.clone())));
+    assert_eq!(tc_expr(onePFuncE, env.clone()),
+               Ok((BaseType("int".to_string()), env.clone())));
 
+    // Test for function with no parameters
+    let twoPFuncT : ParsedType = Function(
+            Box::new(
+                Tuple(vec![
+                    BaseType("int".to_string()),
+                    BaseType("int".to_string())
+                ])
+
+            ),
+            Box::new(
+                BaseType("int".to_string())
+            )
+        );
+    let twoPFuncE : syntax::Expr = syntax::Expr::App{
+        fname: "twoparm".to_string(),
+        arguments: vec![
+            noPFuncE.clone(),
+            noPFuncE.clone(),
+        ]
+    };
+
+    env.insert(
+        "twoparm".to_string(),
+        twoPFuncT.clone()
+    );
+
+    assert_eq!(tc_expr(twoPFuncE, env.clone()),
+               Ok((BaseType("int".to_string()), env.clone())));
 }
