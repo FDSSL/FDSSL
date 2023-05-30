@@ -64,7 +64,29 @@ use std::collections::{HashMap, HashSet};
 
 // Type env, contains bindings of 'things' to types...these can be Exprs or Names
 // w/ a HashMap our insertions & lookups pretty bad at O(n), but that's in the worst possible case, on average we should be seeing O(1)
-type TCEnv = HashMap<String,ParsedType>;
+// type TCEnv = HashMap<String,ParsedType>;
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct TCEnv {
+    env: HashMap<String, ParsedType>,
+    acc: HashSet<ParsedType>,
+}
+
+impl TCEnv {
+    pub fn insert(&mut self, n: String, t: ParsedType) -> Option<ParsedType> {
+        self.env.insert(n, t)
+
+    }
+    pub fn get(&self, n: &str) -> Option<&ParsedType> {
+        self.env.get(&n.to_string())
+    }
+    pub fn new() -> TCEnv {
+        TCEnv { env: HashMap::new(), acc: HashSet::new() }
+    }
+    pub fn accumulate(&mut self, env: TCEnv) {
+        self.acc.extend(env.acc.into_iter())
+    }
+}
+
 
 // A positive type checked result
 pub type TypeChecked = (ParsedType,TCEnv);
@@ -99,13 +121,13 @@ fn tc_fail(e: String) -> TCResult {
 fn tc_lookup(n: &str, env: &TCEnv) -> Result<ParsedType,TCError> {
     match env.get(n) {
         Some(v) => Ok((*v).clone()),
-        None => Err(format!("Non-existant binding '{}' referenced, perhaps you meant to declare it first with 'let' or 'mut'?", n)),
+        None => Err(format!("Non-existant binding '{n}' referenced, perhaps you meant to declare it first with 'let' or 'mut'?")),
     }
 }
 
 /// Attempts to typecheck a program
 pub fn tc_program(p: Program) -> TCResult {
-    let env : TCEnv = HashMap::new();
+    let env = TCEnv { env: HashMap::new(), acc: HashSet::new()};
     tc_body(p, &env)
 }
 
@@ -135,15 +157,6 @@ fn tc_body(body: Vec<Expr>, env: &TCEnv) -> TCResult {
 }
 
 
-/// Returns the immediate arity of a given type w/ a depth of 0
-/// All types return 1 except for tuples
-fn type_arity(t: ParsedType) -> usize {
-    match t {
-        Tuple(v)    => v.len(), // get arity of this tuple, disregarding nesting of other tuples
-        _           => 1 // all others are 1
-    }
-}
-
 /// Helper to make a function type
 fn mk_func_typ(t1: ParsedType, t2: ParsedType) -> ParsedType {
     Function(Box::new(t1), Box::new(t2))
@@ -162,18 +175,17 @@ fn mk_bin_func(t: ParsedType) -> ParsedType {
 
 /// Returns whether a binary operator produces a numeric value
 fn op_num_type(bop: &syntax::BOp) -> bool {
-    match bop {
-        syntax::BOp::Mod => true,
-        syntax::BOp::Gt  => true,
-        syntax::BOp::Gte => true,
-        syntax::BOp::Lte => true,
-        syntax::BOp::Lt  => true,
-        syntax::BOp::Add => true,
-        syntax::BOp::Sub => true,
-        syntax::BOp::Mul => true,
-        syntax::BOp::Div => true,
-        _ => false,
-    }
+    matches!(bop,
+        syntax::BOp::Mod |
+        syntax::BOp::Gt  |
+        syntax::BOp::Gte |
+        syntax::BOp::Lte |
+        syntax::BOp::Lt  |
+        syntax::BOp::Add |
+        syntax::BOp::Sub |
+        syntax::BOp::Mul |
+        syntax::BOp::Div
+    )
 }
 
 /// Returns the type that corresponds to a given BinOp
@@ -190,13 +202,13 @@ fn bop_type(bop: syntax::BOp, a1t: &ParsedType, a2t: &ParsedType) -> Result<Pars
     match (a1t, a2t) {
         (BaseType(b1), BaseType(b2)) => {
             if ! types.contains(b1) {
-                Err(format!("Type {} is not supported by binary operations", b1))
+                Err(format!("Type {b1} is not supported by binary operations"))
             }
             else if ! types.contains(b2) {
-                Err(format!("Type {} is not supported by binary operations", b2))
+                Err(format!("Type {b2} is not supported by binary operations"))
             }
             else if (b1 == "bool" || b2 == "bool") && op_num_type(&bop) {
-                Err(format!("Operator {} does not support bool as an argument", bop))
+                Err(format!("Operator {bop} does not support bool as an argument"))
             }
             else {
                 let (arg1, arg2) = ((*a1t).clone(), (*a2t).clone());
@@ -246,11 +258,11 @@ fn uop_type(uop: UOp, arg: ParsedType) -> Result<ParsedType, TCError> {
     match arg {
         BaseType(n) => {
             match (uop, n.as_str()) {
-                (Negative, "int")      => Ok(mk_func_typ(arg1, arg2)),
-                (Negative, "float")    => Ok(mk_func_typ(arg1, arg2)),
-                (Negative, "double")   => Ok(mk_func_typ(arg1, arg2)),
+                (syntax::UOp::Negative, "int")      => Ok(mk_func_typ(arg1, arg2)),
+                (syntax::UOp::Negative, "float")    => Ok(mk_func_typ(arg1, arg2)),
+                (syntax::UOp::Negative, "double")   => Ok(mk_func_typ(arg1, arg2)),
         
-                (Negate, "bool")   => Ok(mk_func_typ(arg1, arg2)),
+                (syntax::UOp::Negate, "bool")   => Ok(mk_func_typ(arg1, arg2)),
 
                 _ => Err(format!("Invalid marghing of unary op {uop} with an argument type {n}"))
             }
@@ -494,71 +506,69 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
         // Function application
         Expr::App{fname: f, arguments: args} => {
             // verify that this name exists
-            let res = tc_lookup(&f, &env);
-            if res.is_err() {
-                return tc_fail(format!("Function {} does not exist", f));
+            let (argType, returnType) = match tc_lookup(&f, &env) {
+                Ok(Function(argType, returnType)) => Ok((argType, returnType)),
+                Ok(_) => Err(format!("Variable {f} is not a function.")),
+                Err(a) => Err(a),
+            }?;
+
+
+            // Check if the number of arguments matches the parameters
+            let expected = argType.arity();
+            let provided = args.len();
+            if argType.arity() != args.len() {
+                return tc_fail(format!("Incorrect number of arguments passed to function {f}: Expected {expected}, provided {provided}"));
             }
 
-            // verify that our function is actually a function
-            // and if so, extract the arg & return types
-            let maybeFunc = tc_lookup(&f, &env)?;
-            let (argType, retType) = if let Function(a,r) = maybeFunc {
-                (a,r)
-            }
-            else {
-                return tc_fail(format!("Variable {} is not a function!", f));
-            };
-
-            // verify that we have the correct # of args
-            if type_arity(*argType.clone()) != args.len() {
-                return tc_fail(format!("Incorrect number of arguments passed to f {}", f));
-            }
-            let l2 = args.len();
-
-            // compute argument types
-            // TODO @montymxb argument evaluation should update the environment instead of just cloning it
-            let mut mutEnv = env.clone();
-            let maybeArgTypesComputed: Vec<Result<(ParsedType, HashMap<String, ParsedType>), String>> = args.into_iter().map(|e| tc_expr(e, mutEnv.clone())).collect();
-
-            let maybeArgTypesComputedLen = maybeArgTypesComputed.as_slice().len();
-
-            // check that the lengths match up
-            if maybeArgTypesComputedLen != l2 {
-                return tc_fail(format!("Incorrect number of arguments supplied to function {}", f));
+            // What if it's a function with no arguments?
+            if argType.arity() == 0 {
+                return tc_pass(*returnType, env);
             }
 
-            // verify that all of these are success (on any failures, we should just exit out)
-            for argResult in maybeArgTypesComputed.as_slice() {
-                if argResult.is_err() {
-                    return tc_fail(format!("Failed to typecheck argument of function {}", f));
+            // Typecheck arguments
+            let tcArgs : Vec<Result<ParsedType, _>> = args.into_iter().map(
+                |elt| {
+                    match tc_expr(elt, env.clone()) {
+                        Ok((t, e2)) => {
+                            env.accumulate(e2);
+                            Ok(t)
+                        },
+                        Err(e) => Err(e),
+                    }
                 }
+            ).collect();
+
+            // Error if there are any typecheck failures.
+            if tcArgs.iter().any(Result::is_err) {
+                return tc_fail(format!("Failed to typecheck argument of function {f}"));
             }
+
+            // Remove result type
+            let tcArgs : Vec<ParsedType> = tcArgs.into_iter().map(Result::unwrap).collect();
+
 
             // before checking look to lift the supplied args into a tuple
-            // this will let us easily check the two types in a single go
-            let argTypesComputed = maybeArgTypesComputed.into_iter().filter(|atc| atc.is_ok()).map(|atc| {
-                let (p,_) = atc.unwrap();
-                return p;
-            }).collect_vec();
-            let mut argPTComputed : ParsedType;
-            if maybeArgTypesComputedLen > 1 {
-                // unpack & wrap in a tuple
-                argPTComputed = Tuple(argTypesComputed);
-            } else {
-                // just the single value
-                argPTComputed = argTypesComputed[0].clone();
-
+            // This is how Abs expressions are typed.
+            let tcArgs : ParsedType = if tcArgs.len() > 1 {
+                Tuple(tcArgs)
             }
+            else {
+                tcArgs[0].clone()
+            };
+
+
             
             // type check the args
-            if argPTComputed == *argType {
+            if tcArgs == *argType {
                 // valid, return the function's return type
-                return tc_pass(*retType, env);
+                tc_pass(*returnType, env)
             }
             else {
                 // fail, type mismatch!
                 // TODO, improve message
-                return tc_fail("Function typecheck failed".to_string());
+                tc_fail(
+                    format!("Function {f} expected parameter type {argType} but received {tcArgs}")
+                )
             }
         }
 
@@ -652,7 +662,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
         Expr::Branch{condition: c, b1: b1, b2: b2} => {
             let (t1,env1) = tc_expr(*c, env)?;
             if t1 != BaseType("bool".to_string()) {
-                return tc_fail(format!("'If' was expecting an expression of type 'bool', but got an expression of type '{t1}' instead"));
+                tc_fail(format!("'If' was expecting an expression of type 'bool', but got an expression of type '{t1}' instead"))
 
             } else {
                 // verify the types of b1 & b2 match
@@ -668,7 +678,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 
                 } else {
                     // body types do NOT match, fail
-                    return tc_fail(format!("'If' branches were expected to have the same type, but have differing types of '{tb1}' and '{tb2}' instead"));
+                    tc_fail(format!("'If' branches were expected to have the same type, but have differing types of '{tb1}' and '{tb2}' instead"))
 
                 }
             }
@@ -774,7 +784,7 @@ fn tc_expr(e: Expr, mut env: TCEnv) -> TCResult {
 /// Tests typechecker env lookup behavior
 #[test]
 fn test_tc_lookup() {
-    let mut tcEnv: TCEnv = HashMap::new();
+    let mut tcEnv: TCEnv = TCEnv::new();
     let bt: ParsedType = typ("SomeString");
     tcEnv.insert("key".to_string(), bt.clone());
 
@@ -799,7 +809,7 @@ fn test_tc_lookup() {
 
 #[test]
 fn test_tc_body() {
-    let tcEnv: TCEnv = HashMap::new();
+    let tcEnv = TCEnv::new();
 
     // typecheck an empty body, should fail
     let body: Vec<Expr> = vec![];
@@ -814,22 +824,22 @@ fn test_tc_body() {
 #[test]
 fn test_type_arity() {
     // base type
-    let a1: usize = type_arity(BaseType("".to_string()));
+    let a1: usize = BaseType("".to_string()).arity();
     // tuple
-    let a2: usize = type_arity(Tuple(vec![
+    let a2: usize = Tuple(vec![
         typ("a"),
         typ("b"),
         typ("c")
-    ]));
+    ]).arity();
     // named tuple
-    let a3: usize = type_arity(NamedTuple(vec![
+    let a3: usize = NamedTuple(vec![
         ("".to_string(), Box::new(typ("e")))
-    ]));
+    ]).arity();
     // function type
-    let a4: usize = type_arity(Function(
+    let a4: usize = Function(
         Box::new(typ("a")),
         Box::new(typ("b"))
-    ));
+    ).arity();
 
     assert_eq!(a1, 1, "Arity was wrong for a BaseType");
     assert_eq!(a2, 3, "Arity was wrong for a Tuple");
@@ -882,7 +892,7 @@ macro_rules! assert_ok {
 /// Typecheck various expressions
 #[test]
 fn test_tc_expr() {
-    let mut tcEnv: TCEnv = HashMap::new();
+    let mut tcEnv: TCEnv = TCEnv::new();
     tcEnv.insert("ref".to_string(), typ("int"));
     tcEnv.insert("add".to_string(), mk_bin_func(typ("int")));
 
@@ -903,4 +913,80 @@ fn test_tc_expr() {
     // TODO @montymxb test for Abstraction would be good
     // TODO @montymxb test for branch would be good here too
 
+}
+#[test]
+fn test_tc_app() {
+    let mut env : TCEnv = TCEnv::new();
+
+    // Test for function with no parameters
+    let noPFuncT : ParsedType = Function(
+            Box::new(
+                Tuple(Vec::new())
+            ),
+            Box::new(
+                BaseType("int".to_string())
+            )
+        );
+    let noPFuncE : syntax::Expr = syntax::Expr::App{fname: "noparm".to_string(), arguments: Vec::new()};
+
+    env.insert(
+        "noparm".to_string(),
+        noPFuncT.clone()
+    );
+
+    assert_eq!(tc_expr(noPFuncE.clone(), env.clone()),
+               Ok((BaseType("int".to_string()), env.clone())));
+
+    // Test for function with no parameters
+    let onePFuncT : ParsedType = Function(
+            Box::new(
+                BaseType("int".to_string())
+            ),
+            Box::new(
+                BaseType("int".to_string())
+            )
+        );
+    let onePFuncE : syntax::Expr = syntax::Expr::App{
+        fname: "oneparm".to_string(),
+        arguments: vec![
+            noPFuncE.clone()
+        ]
+    };
+
+    env.insert(
+        "oneparm".to_string(),
+        onePFuncT.clone()
+    );
+
+    assert_eq!(tc_expr(onePFuncE, env.clone()),
+               Ok((BaseType("int".to_string()), env.clone())));
+
+    // Test for function with no parameters
+    let twoPFuncT : ParsedType = Function(
+            Box::new(
+                Tuple(vec![
+                    BaseType("int".to_string()),
+                    BaseType("int".to_string())
+                ])
+
+            ),
+            Box::new(
+                BaseType("int".to_string())
+            )
+        );
+    let twoPFuncE : syntax::Expr = syntax::Expr::App{
+        fname: "twoparm".to_string(),
+        arguments: vec![
+            noPFuncE.clone(),
+            noPFuncE.clone(),
+        ]
+    };
+
+    env.insert(
+        "twoparm".to_string(),
+        twoPFuncT.clone()
+    );
+
+    assert_eq!(tc_expr(twoPFuncE, env.clone()),
+               Ok((BaseType("int".to_string()), env.clone())));
 }

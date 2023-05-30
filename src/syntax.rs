@@ -18,7 +18,7 @@ pub enum Type {
 /// This enum is not meant to be used outside the parser and type checker
 /// as it simply denotes the structure of the type rather than any type
 /// space the type occupies.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum ParsedType {
     BaseType(String),
     Tuple(Vec<ParsedType>),
@@ -26,34 +26,38 @@ pub enum ParsedType {
     Function(Box<ParsedType>, Box<ParsedType>),
 }
 
+impl ParsedType {
+    pub fn arity(&self) -> usize {
+        match self {
+            ParsedType::Tuple(v) => v.len(),
+            ParsedType::NamedTuple(v) => v.len(),
+            _ => 1,
+        }
+    }
+}
+
 /// User friendly dipslyaing of parsed types in TypeChecker errors
 impl fmt::Display for ParsedType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &*self {
-            ParsedType::BaseType(s)     => write!(f, "{}", s),
-            ParsedType::Tuple(v)        => {
-                write!(f, "(");
-                for (i,t) in v.into_iter().enumerate() {
-                    write!(f, "{}", t);
-                    if i < (v.len()-1) {
-                        write!(f, ", ");
-                    }
-                }
-                write!(f, ")")
+        let e_type = match self {
+           ParsedType::BaseType(s)     => s.to_string(),
+           ParsedType::Tuple(v)        => {
+               format!("({})",
+                       v.iter().map(|i| {
+                           format!("{i},")
+                       }).collect::<Vec<String>>().concat()
+               )
             },
-            ParsedType::Function(t1,t2) => write!(f, "{} -> {}", format!("{}",t1), format!("{}",t2)),
+            ParsedType::Function(t1,t2) => format!("{t1} -> {t2}"),
             ParsedType::NamedTuple(v)   => {
-                write!(f, "(");
-                for (i,t) in v.into_iter().enumerate() {
-                    write!(f, "{}:{}", t.0, *t.1);
-                    if i < (v.len()-1) {
-                        write!(f, ", ");
-                    }
-                }
-                write!(f, ")")
-                // write!(f, "({})", format!("{:?}",v))
+               format!("({})",
+                       v.iter().map(|i| {
+                           format!("{}:{},", i.0, *i.1)
+                       }).collect::<Vec<String>>().concat()
+               )
             }
-        }
+        };
+        write!(f, "{e_type}")
     }
 }
 
@@ -99,7 +103,7 @@ impl fmt::Display for BOp {
             BOp::BitOr => "|",
             BOp::BitXor => "^",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -124,13 +128,13 @@ pub struct Parameter {
     datatype: Type,
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Clone)]
 pub enum AccessType {
     Name(String),
     Idx(Box<Expr>)
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq, Clone)]
 pub enum Expr {
     I(i32),
     B(bool),
